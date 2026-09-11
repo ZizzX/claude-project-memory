@@ -77,13 +77,13 @@ is enabled (§5.7). It is not a worktree of the project, so worktree managers do
 pm/
   .git/                 branch pm; no remote by default, the project's remote once sync is on (§5.7)
   .gitattributes        decisions.md and memory/MEMORY.md use merge=union
-  .gitignore            .state/
+  .gitignore            .state/, BOARD.md, board.html
   PLAN.md               accepted plan
-  tasks/T-001-slug.md   one file per task
+  tasks/T-001.md        one file per task (file name = id; the title can change freely)
   decisions.md          append-only decision log
   memory/               Claude Code auto-memory, linked into place (§5.8)
-  BOARD.md              generated, never hand-edited
-  board.html            generated, never hand-edited
+  BOARD.md              generated, gitignored (rebuilt on every machine), never hand-edited
+  board.html            generated, gitignored, never hand-edited
   .state/               hook bookkeeping, machine-local
 ```
 
@@ -113,7 +113,7 @@ plan, the board diff line) is written in the language the user speaks in chat.
 
 Edited in place; every edit appends one changelog line.
 
-### 5.5 Task file `tasks/T-003-csv-import.md`
+### 5.5 Task file `tasks/T-003.md`
 
 ```markdown
 ---
@@ -211,17 +211,17 @@ updated: 2026-09-12
 
 ## 6. Script `scripts/pm.mjs`
 
-Single file, Node ≥ 20, standard library only, no platform-specific shell commands (git is invoked
-directly via `child_process.execFileSync`). Handles everything deterministic; the agent writes prose
+Entry point `scripts/pm.mjs` with focused modules in `scripts/lib/`; Node ≥ 20, standard library only,
+no platform-specific shell commands (git is invoked directly via `child_process.execFileSync`). Handles everything deterministic; the agent writes prose
 sections with normal file edits.
 
 | Command | Effect |
 |---|---|
 | `pm init` | Create a local board (no remote), print the path |
-| `pm sync on [--remote url]` / `pm sync off` | Enable / disable sync for this project (§5.7); `on` also links memory (§5.8) |
+| `pm sync on [--remote url] [--yes]` / `pm sync off` | Without `--yes`, `on` only prints the push target; with it, enables sync (§5.7) and links memory (§5.8). With no local board and a board on the remote, `on` clones it |
 | `pm sync` | When sync is on: pull + push now; on conflict list files to merge |
 | `pm scan` | List plan files from other tools found for this repo (§8) with checkbox counts done/total |
-| `pm task new --title T [--order N] [--deps T-1,T-2] [--milestone M1] [--links p]` | Create the next `T-NNN-slug.md` from the template. Id is reserved by exclusive file create (`wx`), retrying on collision |
+| `pm task new --title T [--order N] [--deps T-1,T-2] [--milestone M1] [--links p]` | Create the next `T-NNN.md` from the template; the id is reserved by exclusive file create (`wx`), retrying on collision |
 | `pm set T-003 key=value ...` | Update frontmatter fields, bump `updated` |
 | `pm claim T-003` | Add the current worktree to `worktrees`, set `in_progress` |
 | `pm log T-003 --did "..." --next "..."` | Append a dated, worktree-signed Log entry |
@@ -236,8 +236,8 @@ Every mutating command regenerates the board and commits `pm/` (`git add -A && g
 "pm: <command> <id>"`, one retry if `index.lock` is busy), then, if sync is on, triggers the background
 push. Each
 change — including the agent's direct prose edits made since the previous commit — is individually
-revertible. Ids are reserved locally; if two machines create the same id offline, `validate` (run by
-`pm sync` and at `SessionStart`) reports the duplicate and the agent renumbers one of them.
+revertible. Ids are reserved locally; if two machines create the same id offline, the sync hits an
+add/add conflict on `tasks/T-NNN.md` and the agent renumbers one of them while resolving it.
 
 ## 7. Hooks (`hooks/hooks.json`)
 
@@ -254,15 +254,18 @@ If sync is on: pull (§5.7) and repair the memory link (§5.8). Store `{session 
 [pm] <project> · focus: <Current focus> · board: file:///…/pm/board.html
 Your worktree (<name>):
   T-003 CSV import [in_progress] → next: <last Log next:> (<date>, <machine/worktree>)
+Elsewhere: T-008 <title> @ <other worktree>
 Ready: T-004 <title> · T-006 <title> · T-007 <title>
 Waiting: T-005 ← <waiting_on>
 Decisions: D-004 <title> · D-003 <title> · D-002 <title>
+CLI: node "<plugin root>/scripts/pm.mjs" <command>
 Rules: maintain tasks/statuses/decisions yourself · end every turn that changed the board with a
   one-line board diff · only the main agent writes pm/ · before "done" ask "what's left?" · details: /pm
 ```
 
-Limits: all tasks of this worktree, first 3 ready, up to 5 waiting, last 3 decisions, plus at most one
-sync line (conflict, duplicate ids, commits unpushed for over a day, or "this repo has a shared board").
+Limits: all open tasks of this worktree, up to 5 in progress elsewhere, first 3 ready, up to 5 waiting,
+last 3 decisions, plus at most one status line (sync conflict, commits unpushed for over a day, or
+problems reported by `validate`).
 A repo with no local board prints only that shared-board hint when it applies, otherwise nothing. The rules digest is always included: it is what makes autonomy work without
 loading the full skill.
 
@@ -347,8 +350,9 @@ The full skill loads only on `/pm` or when triggered; the rules digest from §7.
 .claude-plugin/marketplace.json   this repo as a single-plugin marketplace
 skills/pm/SKILL.md
 hooks/hooks.json
-scripts/pm.mjs
-scripts/pm.test.mjs
+scripts/pm.mjs                    CLI and hook entry point
+scripts/lib/*.mjs                 modules (paths, frontmatter, tasks, decisions, plan, board, store, summary, scan, sync, hooks)
+test/*.test.mjs                   node:test suites
 .github/workflows/test.yml        node --test on windows-latest, macos-latest, ubuntu-latest
 README.md                         what it does, install, daily use, sync, privacy, coexistence with other memory tools
 LICENSE                           MIT
@@ -376,7 +380,7 @@ Tracked as tasks on this project's own board (dogfooding), each confirmed separa
 
 ## 12. Testing
 
-Automated (`node --test scripts/pm.test.mjs`) using temp directories: throwaway git repos with linked
+Automated (`node --test`) using temp directories: throwaway git repos with linked
 worktrees, a local bare repo as the remote, and `CLAUDE_CONFIG_DIR` pointing into the temp dir. Runs in CI
 on Windows, macOS and Linux.
 
@@ -399,7 +403,7 @@ on Windows, macOS and Linux.
     at `SessionStart` when `refs/remotes/origin/pm` exists, clones nothing until `pm sync on`, and makes no
     network call either way.
 13. Concurrent edits from two clones: `decisions.md` merges cleanly; a conflicting task edit sets the
-    conflict flag, shows the summary line, and loses no data; a duplicate id is reported by `validate`.
+    conflict flag, shows the summary line, and loses no data.
 14. Offline remote: hooks still exit 0 within the timeout; changes are committed locally and pushed later.
 15. Memory link: untouched while sync is off; on `pm sync on` an existing `memory/` folder is moved
     without loss (clash → both kept), the link is created and repaired; `pm.syncMemory false` leaves
