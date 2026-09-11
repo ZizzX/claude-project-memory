@@ -1,7 +1,7 @@
 # project-memory (`/pm`) — design
 
-Date: 2026-09-12 · Status: approved in brainstorming (rev. 2: cross-machine sync, memory sync, public
-release), awaiting spec review
+Date: 2026-09-12 · Status: approved in brainstorming (rev. 3: public release; cross-machine sync of board
+and memory is opt-in per project, local by default), awaiting spec review
 
 ## 1. Problem
 
@@ -28,7 +28,8 @@ driven by hooks (deterministic) with a skill describing the protocol.
 5. Full agent autonomy: the agent maintains all of the above itself and reports a one-line board diff.
 6. Plans produced by other tools (superpowers, gstack, plan mode, dev-cycle) feed the board.
 7. A human view: `BOARD.md` and a read-only HTML kanban `board.html`.
-8. Board and auto-memory are shared across the user's machines (Windows, macOS, Linux).
+8. Everything is local by default; on explicit request, a project's board and auto-memory sync across
+   the user's machines (Windows, macOS, Linux) through the project's own repository.
 9. Published on GitHub as a Claude Code plugin anyone can install.
 
 ## 3. Non-goals (v1)
@@ -45,8 +46,8 @@ two-way sync with other tools' plan files · a hosted service of any kind.
 | 3 | Concurrency: usually one agent; sometimes several worktrees on one task | Tasks list attached worktrees; logs are append-only; ids are reserved atomically |
 | 4 | Full agent autonomy | Explicit-command discipline is exactly what fails today |
 | 5 | Other tools' plans stay where they are; the board gets coarse items + a link | One source of truth for status; no duplicated content; other skills stay unpatched |
-| 6 | Cross-machine sync via an orphan branch `pm` in the project's own repository | Zero setup, travels with the project; collaborators share the board automatically |
-| 7 | Auto-memory moves into the board clone and syncs with it | Facts and preferences follow the user to other machines; opt-out per project |
+| 6 | Local by default; sync is opt-in per project, via an orphan branch `pm` in the project's own repository | Nothing leaves the machine unless the user asks; no surprises for collaborators; once enabled, the board travels with the project |
+| 7 | When sync is enabled, auto-memory moves into the board clone and syncs with it | Facts and preferences follow the user to other machines; opt-out per project |
 | 8 | Plugin content is generic, cross-platform, MIT, English docs, multilingual triggers | Public release |
 
 ## 5. Storage
@@ -69,12 +70,12 @@ two-way sync with other tools' plan files · a hosted service of any kind.
 
 ### 5.2 Layout
 
-`pm/` is a git clone holding only the orphan branch `pm` (§5.7). It is not a worktree of the project,
-so worktree managers do not list it.
+`pm/` is its own small git repository on branch `pm` (local history, undo). It has no remote until sync
+is enabled (§5.7). It is not a worktree of the project, so worktree managers do not list it.
 
 ```
 pm/
-  .git/                 branch pm; remote = project's remote (§5.7)
+  .git/                 branch pm; no remote by default, the project's remote once sync is on (§5.7)
   .gitattributes        decisions.md and memory/MEMORY.md use merge=union
   .gitignore            .state/
   PLAN.md               accepted plan
@@ -160,31 +161,41 @@ updated: 2026-09-12
 - tasks: T-001, T-003
 ```
 
-### 5.7 Cross-machine sync
+### 5.7 Cross-machine sync (opt-in per project)
 
-- **Remote** = `git config pm.remote` in the project repo if set, else the URL of the project's `origin`.
-  `pm.remote` lets a public project keep its board in a private repository.
-- **Init** (`pm init`): if the remote already has branch `pm`, clone it
-  (`git clone --single-branch --branch pm <remote> <pm path>`). Otherwise create the skeleton on an
-  orphan branch `pm` and `git push -u origin pm`. Init prints one line: the board will be pushed to
-  `<remote>` branch `pm`, and how to set `pm.remote` if that repository is public.
-- **No remote**: `pm/` is a local-only repo; `pm sync` attaches a remote later.
-- **Auto-attach on another machine**: at `SessionStart`, if no local `pm/` exists but the project repo has
-  a remote-tracking ref `refs/remotes/<remote-name>/pm` (brought by a normal `git fetch`), clone it
-  automatically. This check is local-only, so repos without a board cost no network call. Git config is
-  per clone, so a project using `pm.remote` needs `git config pm.remote …` and `pm init` once per machine.
-- **Pull**: at `SessionStart`, `git pull --rebase` with a 5-second timeout; a failure (offline, auth)
-  is silent and the session continues on local state.
-- **Push**: after every `pm/` commit, a detached background process runs `pull --rebase` then `push`,
-  never blocking the session.
+- **Default: local only.** `pm init` creates a local repo with no remote. Nothing is ever pushed, fetched
+  or shared until the user explicitly asks.
+- **Sync enabled** ⇔ the `pm/` repo has a remote named `origin`. There is no other flag.
+- **Remote** = `--remote <url>` if given, else the URL of the project's `origin`. A private URL lets a
+  public project keep its board private.
+- **`pm sync on [--remote url]`** (user asks: "enable board sync" / "включи синхронизацию доски"):
+  1. print one line: the board and memory will be pushed to `<remote>` branch `pm` — if that repository
+     is public, they become public (suggest `--remote <private-url>`); the agent confirms with the user
+     before continuing;
+  2. add the remote; if it already has branch `pm`, merge it into the local board
+     (`--allow-unrelated-histories` when both exist; conflicts follow the rule below), else push
+     `-u origin pm`;
+  3. link memory (§5.8) unless `git config pm.syncMemory false`.
+- **`pm sync off`**: remove the remote; the local board stays. Prints how to delete the remote branch if
+  the user wants it gone.
+- **Another machine or a collaborator — never automatic.** At `SessionStart`, if the project repo has a
+  remote-tracking ref `refs/remotes/origin/pm` (brought by a normal `git fetch`) and this machine has no
+  synced board, the summary shows one line: `[pm] this repo has a shared board (branch pm) — say
+  "connect the board" to use it`. Nothing is cloned until the user says so (`pm sync on`). This check is
+  local-only: no network call.
+- **Pull** (sync on only): at `SessionStart`, `git pull --rebase` with a 5-second timeout; a failure
+  (offline, auth) is silent and the session continues on local state.
+- **Push** (sync on only): after every `pm/` commit, a detached background process runs `pull --rebase`
+  then `push`, never blocking the session.
 - **Conflicts**: `decisions.md` and `memory/MEMORY.md` merge by union. Any other conflict aborts the
   rebase, keeps local commits, and records `.state/conflict`; the session summary then shows
   `[pm] sync conflict — run /pm sync`, and `pm sync` lists the files for the agent to merge. Nothing is
   ever discarded automatically.
-- **Collaborators** who install the plugin get the same board through the same branch; their worktree
-  names appear in `worktrees` and `Log`.
+- **Collaborators** who install the plugin keep their own local boards; only if they explicitly connect
+  do they share the same board, and their worktree names appear in `worktrees` and `Log`. Collaborators
+  without the plugin only see an extra branch.
 
-### 5.8 Memory sync
+### 5.8 Memory sync (only when sync is on)
 
 - Claude Code's auto-memory folder `<claude-home>/projects/<repo-key>/memory` becomes a link to
   `pm/memory`: a directory junction on Windows (no admin rights needed), a symlink on macOS/Linux.
@@ -206,8 +217,9 @@ sections with normal file edits.
 
 | Command | Effect |
 |---|---|
-| `pm init` | Create or clone the board (§5.7), link memory (§5.8), print the path |
-| `pm sync` | Pull + push now; attach a remote if missing; on conflict list files to merge |
+| `pm init` | Create a local board (no remote), print the path |
+| `pm sync on [--remote url]` / `pm sync off` | Enable / disable sync for this project (§5.7); `on` also links memory (§5.8) |
+| `pm sync` | When sync is on: pull + push now; on conflict list files to merge |
 | `pm scan` | List plan files from other tools found for this repo (§8) with checkbox counts done/total |
 | `pm task new --title T [--order N] [--deps T-1,T-2] [--milestone M1] [--links p]` | Create the next `T-NNN-slug.md` from the template. Id is reserved by exclusive file create (`wx`), retrying on collision |
 | `pm set T-003 key=value ...` | Update frontmatter fields, bump `updated` |
@@ -221,7 +233,8 @@ sections with normal file edits.
 | `pm hook <event>` | Hook entry point: reads hook JSON from stdin (§7) |
 
 Every mutating command regenerates the board and commits `pm/` (`git add -A && git commit -m
-"pm: <command> <id>"`, one retry if `index.lock` is busy), then triggers the background push. Each
+"pm: <command> <id>"`, one retry if `index.lock` is busy), then, if sync is on, triggers the background
+push. Each
 change — including the agent's direct prose edits made since the previous commit — is individually
 revertible. Ids are reserved locally; if two machines create the same id offline, `validate` (run by
 `pm sync` and at `SessionStart`) reports the duplicate and the agent renumbers one of them.
@@ -229,12 +242,12 @@ revertible. Ids are reserved locally; if two machines create the same id offline
 ## 7. Hooks (`hooks/hooks.json`)
 
 Each hook runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/pm.mjs" hook <event>`. If no board exists for the
-repo (and none can be auto-attached), every hook exits 0 silently. Every hook exits 0 on any internal
+repo, every hook exits 0 silently (except the one-line shared-board hint of §7.1). Every hook exits 0 on any internal
 error: the plugin must never break a session.
 
 ### 7.1 `SessionStart` (sources: startup, resume, clear, compact)
 
-Auto-attach or pull (§5.7), repair the memory link (§5.8), store `{session start time, HEAD}` in
+If sync is on: pull (§5.7) and repair the memory link (§5.8). Store `{session start time, HEAD}` in
 `.state/<session_id>.json`, then print the summary (hard limit 40 lines):
 
 ```
@@ -249,7 +262,8 @@ Rules: maintain tasks/statuses/decisions yourself · end every turn that changed
 ```
 
 Limits: all tasks of this worktree, first 3 ready, up to 5 waiting, last 3 decisions, plus at most one
-sync line (conflict, duplicate ids, or commits unpushed for over a day). The rules digest is always included: it is what makes autonomy work without
+sync line (conflict, duplicate ids, commits unpushed for over a day, or "this repo has a shared board").
+A repo with no local board prints only that shared-board hint when it applies, otherwise nothing. The rules digest is always included: it is what makes autonomy work without
 loading the full skill.
 
 ### 7.2 `PostToolUse` (matcher `Write|Edit|MultiEdit|ExitPlanMode`)
@@ -260,7 +274,8 @@ loading the full skill.
 
 ### 7.3 `Stop` — "board not updated" guard
 
-First commits any uncommitted `pm/` changes (including memory files) and triggers the background push.
+First commits any uncommitted `pm/` changes (including memory files) and, if sync is on, triggers the
+background push.
 Then blocks at most once per throttle window with `{"decision":"block","reason":…}` when all hold:
 
 - `stop_hook_active` is false;
@@ -313,6 +328,8 @@ Trigger phrases are listed in English and Russian; the agent matches intent, not
 | "waiting for …" / "ждём …" | `waiting` with `waiting_on` |
 | "undo T-007" / "откати T-007" | Revert the last board change using the `pm/` git history |
 | no board yet, non-trivial multi-step work starts | `pm init`, fill `PLAN.md`, import via `pm scan`; announce it in the board diff line |
+| "enable board sync", "connect the board" / "включи синхронизацию доски", "подключи доску" | Show the push-target line from `pm sync on`, get the user's yes, then run it. Never enable sync on the agent's own initiative |
+| "disable board sync" / "выключи синхронизацию" | `pm sync off` |
 
 Rules:
 - Every turn that changed the board ends with one line, e.g.
@@ -340,8 +357,8 @@ LICENSE                           MIT
 - Install for anyone: `/plugin marketplace add <owner>/<repo>`, then `/plugin install project-memory@<marketplace>`.
 - Development: `claude --plugin-dir <repo>`.
 - No personal paths, names or machine-specific settings in shipped files.
-- README "Privacy" section: the board and memory are pushed to the project's remote branch `pm`; how to
-  use `pm.remote` and `pm.syncMemory`.
+- README "Privacy" section: everything is local by default; `pm sync on` pushes the board and memory to
+  branch `pm` of the project's remote (or `--remote`); how to use `pm.syncMemory false` and `pm sync off`.
 - README "Coexisting with other memory tools": generic advice to disable overlapping resume/memory
   mechanisms once `/pm` works.
 - Publishing the GitHub repository and tagging `v0.1.0` happen after dogfooding, with explicit approval.
@@ -350,7 +367,8 @@ LICENSE                           MIT
 
 Tracked as tasks on this project's own board (dogfooding), each confirmed separately, all reversible:
 
-- Install on Windows, then on the MacBook; verify the MacBook session sees the Windows board and memory.
+- Install on Windows; enable sync for this project; install on the MacBook, connect the board, and
+  verify the MacBook session sees the Windows board and memory.
 - After about a week of use: replace the global CLAUDE.md "feature-puzzles / per-task memory" section and
   the "Session protocol" SessionStart prompt with a pointer to `/pm`; disable the token-optimizer
   checkpoint hint; stop using gstack `/context-save`/`/context-restore`; remove the unused agentmemory MCP
@@ -374,15 +392,18 @@ on Windows, macOS and Linux.
    when the code is unchanged; silent within the throttle window.
 9. PreCompact/SessionEnd: auto note appended only to in-progress tasks of this worktree; committed.
 10. Every hook exits 0 silently when the repo has no board, when cwd is not a git repo, and on internal errors.
-11. Init with a remote lacking `pm` creates the orphan branch and pushes it; init with a remote that has
-    `pm` clones it.
-12. "Second machine": a separate clone with a different `CLAUDE_CONFIG_DIR` auto-attaches the board at
-    `SessionStart` when `refs/remotes/origin/pm` exists; no network call when it does not.
+11. `pm init` never creates a remote and no command pushes while sync is off. `pm sync on` with a remote
+    lacking `pm` pushes the branch; with a remote that has `pm` it merges it (including into an existing
+    local board); `pm sync off` removes the remote and keeps the board.
+12. "Second machine": a separate clone with a different `CLAUDE_CONFIG_DIR` shows the shared-board hint
+    at `SessionStart` when `refs/remotes/origin/pm` exists, clones nothing until `pm sync on`, and makes no
+    network call either way.
 13. Concurrent edits from two clones: `decisions.md` merges cleanly; a conflicting task edit sets the
     conflict flag, shows the summary line, and loses no data; a duplicate id is reported by `validate`.
 14. Offline remote: hooks still exit 0 within the timeout; changes are committed locally and pushed later.
-15. Memory link: an existing `memory/` folder is moved without loss (clash → both kept), the link is
-    created and repaired; `pm.syncMemory false` leaves memory untouched.
+15. Memory link: untouched while sync is off; on `pm sync on` an existing `memory/` folder is moved
+    without loss (clash → both kept), the link is created and repaired; `pm.syncMemory false` leaves
+    memory untouched.
 
 Manual dogfooding: the first board is this project's own board, tracking the tasks of this plan. Check: a
 new session shows the summary; a second worktree sees the same board; the MacBook sees the same board and
@@ -404,7 +425,7 @@ Other risks:
 
 | Risk | Mitigation |
 |---|---|
-| Board of a public repo becomes public | Init warning line; `pm.remote` override; README privacy section |
+| Board of a public repo becomes public | Local by default; `pm sync on` shows the push target and requires the user's yes; `--remote` for a private repo; README privacy section |
 | Stop guard becomes annoying | Throttle window; single constant to tune |
 | Summary bloats context | Hard 40-line cap, tested |
 | Background push fails silently for days | Summary shows `[pm] N commits not pushed` when the local branch is ahead of the remote by more than 0 for over a day |
