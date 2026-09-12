@@ -5,6 +5,9 @@ import { hasBoard, initBoard, identityArgs } from './store.mjs';
 import { writeBoard } from './board.mjs';
 
 const NET = { timeout: 60_000 };
+// Our git calls die on a 5s/60s timeout and a commit holds the lock for milliseconds,
+// so any index.lock older than this cannot belong to a live pm process.
+const STALE_LOCK_MS = 5 * 60_000;
 const conflictPath = (pm) => path.join(pm, '.state', 'conflict');
 
 export const syncTarget = (cwd, remote) => remote || tryGit(['remote', 'get-url', 'origin'], cwd);
@@ -19,15 +22,18 @@ function recordConflict(pm, op, files) {
 }
 
 // A git process killed mid-write (e.g. by pull's timeout) can leave a stale index.lock
-// behind. Safe to remove once no rebase/merge is actually in progress any more — this
-// is always the board repo (`pm`), never the project's own repo.
+// behind. "No rebase/merge in progress" does not mean "no other git process is writing"
+// (a concurrent commit from backgroundPush holds this same lock with no rebase/merge
+// state on disk), so orphanhood is decided by age, not by operation state. Only ever
+// called with the board repo (`pm`), never the project's own repo. Returns whether it
+// removed a lock.
 function clearStaleLock(pm) {
-  const dotgit = path.join(pm, '.git');
-  const busy = fs.existsSync(path.join(dotgit, 'rebase-merge'))
-    || fs.existsSync(path.join(dotgit, 'rebase-apply'))
-    || fs.existsSync(path.join(dotgit, 'MERGE_HEAD'));
-  const lock = path.join(dotgit, 'index.lock');
-  if (!busy && fs.existsSync(lock)) fs.rmSync(lock, { force: true });
+  const lock = path.join(pm, '.git', 'index.lock');
+  if (fs.existsSync(lock) && Date.now() - fs.statSync(lock).mtimeMs > STALE_LOCK_MS) {
+    fs.rmSync(lock, { force: true });
+    return true;
+  }
+  return false;
 }
 
 export function conflictFiles(pm) {
@@ -71,23 +77,19 @@ export function pull(pm, timeout = 5000) {
   try {
     git([...identityArgs(pm), 'pull', '-q', '--rebase', '--autostash', 'origin', 'pm'], pm, { timeout });
     fs.rmSync(conflictPath(pm), { force: true });
-    clearStaleLock(pm); // e.g. a lock left by an earlier killed process, with nothing to do this time
     return 'ok';
   } catch {
-    const dotgit = path.join(pm, '.git');
-    const rebasing = fs.existsSync(path.join(dotgit, 'rebase-merge')) || fs.existsSync(path.join(dotgit, 'rebase-apply'));
-    let result = 'offline';
-    if (rebasing) {
-      const files = tryGit(['diff', '--name-only', '--diff-filter=U'], pm) ?? '';
-      if (files) {
-        recordConflict(pm, 'rebase', files);
-        result = 'conflict';
-      } else {
-        tryGit(['rebase', '--abort'], pm); // interrupted (e.g. a killed timeout), not a real conflict
-      }
+    const files = tryGit(['diff', '--name-only', '--diff-filter=U'], pm) ?? '';
+    if (files) {
+      recordConflict(pm, 'rebase', files);
+      return 'conflict';
     }
-    clearStaleLock(pm);
-    return result;
+    // No real conflict: an interrupted rebase, a plain network failure, or a lock left
+    // by a killed process. A stale lock would make the abort itself fail, so clear it
+    // first, and nothing is recorded to .state/conflict on this path.
+    const removedLock = clearStaleLock(pm);
+    if (tryGit(['rebase', '--abort'], pm) === null && removedLock) tryGit(['rebase', '--abort'], pm);
+    return 'offline';
   }
 }
 

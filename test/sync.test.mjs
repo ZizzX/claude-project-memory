@@ -103,13 +103,44 @@ test('offline remote: sync reports offline, exits 0, keeps local commits', () =>
   assert.equal(fs.existsSync(path.join(pmDir(root), '.state', 'conflict')), false, 'a network failure must never look like a conflict');
 });
 
-test('a stale index.lock left by a killed sync is removed, not left broken forever', () => {
+function withUnreachableRemote(root) {
+  sh(['remote', 'set-url', 'origin', path.join(tmp(), 'missing.git')], pmDir(root));
+}
+
+test('a stale index.lock (older than the threshold) is removed', () => {
   const { root } = project();
   cli(['init'], root);
   cli(['sync', 'on', '--yes'], root);
+  withUnreachableRemote(root);
   const lock = path.join(pmDir(root), '.git', 'index.lock');
-  fs.writeFileSync(lock, ''); // simulate a git process killed mid-write, no operation actually in progress
+  fs.writeFileSync(lock, '');
+  const old = new Date(Date.now() - 10 * 60_000); // well past the 5-minute staleness threshold
+  fs.utimesSync(lock, old, old);
   const r = cli(['sync'], root);
   assert.equal(r.code, 0);
   assert.equal(fs.existsSync(lock), false);
+});
+
+test('a fresh index.lock (held by a concurrent pm process) is left alone', () => {
+  const { root } = project();
+  cli(['init'], root);
+  cli(['sync', 'on', '--yes'], root);
+  withUnreachableRemote(root);
+  const lock = path.join(pmDir(root), '.git', 'index.lock');
+  fs.writeFileSync(lock, '');
+  const r = cli(['sync'], root);
+  assert.equal(r.code, 0);
+  assert.equal(fs.existsSync(lock), true, 'a fresh lock may belong to a live pm process and must not be deleted');
+});
+
+test('an interrupted rebase with no conflicted files is offline, not a conflict', () => {
+  const { root } = project();
+  cli(['init'], root);
+  cli(['sync', 'on', '--yes'], root);
+  withUnreachableRemote(root);
+  fs.mkdirSync(path.join(pmDir(root), '.git', 'rebase-merge'), { recursive: true });
+  const r = cli(['sync'], root);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /offline/);
+  assert.equal(fs.existsSync(path.join(pmDir(root), '.state', 'conflict')), false);
 });
