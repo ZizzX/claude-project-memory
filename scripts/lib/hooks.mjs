@@ -93,7 +93,9 @@ export function onSessionStart(input, cwd) {
   writeBoard(pm);
   const problems = validate(listTasks(pm));
   if (!status && problems.length) status = `[pm] board problems: ${problems.slice(0, 3).join('; ')} — run: pm validate`;
-  writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
+  // A missing session_id means no stdin reached us (a plugin reload, not a real session start).
+  // Keying state as "undefined" pools unrelated runs into one window; the summary still prints.
+  if (input.session_id) writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
   return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine: status });
 }
 
@@ -132,6 +134,11 @@ export function onStop(input, cwd, now = Date.now()) {
 export function onSafetyNote(input, cwd, event) {
   const pm = pmDir(cwd);
   if (!pm || !hasBoard(cwd)) return '';
+  if (!input.session_id) {
+    // Without a stable key the "changed since" window belongs to some other run: note nothing.
+    persist(pm, `pm: auto ${event}`);
+    return '';
+  }
   const stateName = `session-${input.session_id}`;
   const { start = Date.now(), head = null } = readState(pm, stateName);
   const worktree = worktreeName(cwd);

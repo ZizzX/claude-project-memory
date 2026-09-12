@@ -116,6 +116,26 @@ test('pre-compact appends an auto note to in-progress tasks of this worktree onl
   assert.equal(sh(['log', '-1', '--format=%s'], pm), 'pm: auto pre-compact');
 });
 
+test('without a session_id: summary still prints, but no state and no auto note', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  const pm = pmDir(root);
+  const orphan = path.join(pm, '.state', 'session-undefined.json');
+  assert.match(onSessionStart({}, root), /^\[pm\] /, 'the summary is still worth printing');
+  assert.ok(!fs.existsSync(orphan), 'an empty payload must not claim the "undefined" state key');
+  cli(['task', 'new', '--title', 'mine'], root);
+  cli(['claim', 'T-001'], root);
+  const f = path.join(root, 'feature.js');
+  fs.writeFileSync(f, 'x');
+  const future = new Date(Date.now() + MIN);
+  fs.utimesSync(f, future, future);
+  fs.appendFileSync(path.join(pm, 'PLAN.md'), '\nedited\n'); // a real board change for persist to commit
+  assert.equal(onSafetyNote({}, root, 'session-end'), '');
+  assert.ok(!fs.existsSync(orphan), 'still none after the safety note');
+  assert.doesNotMatch(fs.readFileSync(path.join(pm, 'tasks', 'T-001.md'), 'utf8'), /auto:/);
+  assert.equal(sh(['log', '-1', '--format=%s'], pm), 'pm: auto session-end', 'the board is still committed');
+});
+
 test('hook entry point always exits 0', () => {
   const { root } = setup();
   const input = JSON.stringify({ session_id: 'x', cwd: root });
