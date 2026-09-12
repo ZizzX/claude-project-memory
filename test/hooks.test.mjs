@@ -70,6 +70,16 @@ test('stop: silent while the board is fresh', () => {
   assert.equal(onStop({}, root), '');
 });
 
+test('stop: a deleted tracked file counts as a code change even though it has no mtime', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  fs.rmSync(path.join(root, 'README.md')); // tracked, committed by setup(); now deleted, uncommitted
+  const later = Date.now() + 120 * MIN;
+  const block = JSON.parse(onStop({}, root, later));
+  assert.equal(block.decision, 'block');
+  assert.match(block.reason, /board/);
+});
+
 test('pre-compact appends an auto note to in-progress tasks of this worktree only', () => {
   const { root } = setup();
   cli(['init'], root);
@@ -99,4 +109,16 @@ test('hook entry point always exits 0', () => {
   const r = cli(['hook', 'session-start'], root, { input });
   assert.equal(r.code, 0);
   assert.match(r.out, /^\[pm\]/);
+});
+
+test('hook stop never throws regardless of stdin shape', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  // Each of these parses without a JSON.parse error, so the fallback-to-{} catch never fires;
+  // the handler must still normalize a non-object result instead of crashing on `input.cwd`.
+  for (const stdin of ['null', '5', '"text"', '[]', 'not json', '']) {
+    const r = cli(['hook', 'stop'], root, { input: stdin });
+    assert.equal(r.code, 0, `stdin ${JSON.stringify(stdin)} should exit 0`);
+    assert.equal(r.err, '', `stdin ${JSON.stringify(stdin)} should print nothing to stderr`);
+  }
 });

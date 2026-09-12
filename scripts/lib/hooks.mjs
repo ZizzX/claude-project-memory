@@ -47,7 +47,7 @@ function dirtyFilesSince(cwd, since) {
     try {
       if (fs.statSync(path.join(top, rel)).mtimeMs > since) files.push(rel);
     } catch {
-      // deleted file: no mtime to compare
+      files.push(rel); // deleted file: no mtime to compare, but a deletion is still a change
     }
   }
   return files;

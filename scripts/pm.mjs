@@ -169,22 +169,26 @@ Re-run with --yes to proceed.`;
   },
 
   // Hooks must never break a session: every path returns normally, errors are swallowed.
+  // Everything that touches `input` lives inside this one try/catch, so a stdin payload
+  // that parses to something falsy-but-not-an-object (null, 5, "text", []) can't throw
+  // past this command.
   hook(cwd, [event]) {
-    let input = {};
     try {
-      input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
-    } catch {
-      // no or malformed stdin
-    }
-    const at = input.cwd || cwd;
-    const handlers = {
-      'session-start': () => onSessionStart(input, at),
-      'post-tool-use': () => onPostToolUse(input, at),
-      stop: () => onStop(input, at),
-      'pre-compact': () => onSafetyNote(input, at, 'pre-compact'),
-      'session-end': () => onSafetyNote(input, at, 'session-end'),
-    };
-    try {
+      let input;
+      try {
+        input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+      } catch {
+        input = {};
+      }
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) input = {};
+      const at = input.cwd || cwd;
+      const handlers = {
+        'session-start': () => onSessionStart(input, at),
+        'post-tool-use': () => onPostToolUse(input, at),
+        stop: () => onStop(input, at),
+        'pre-compact': () => onSafetyNote(input, at, 'pre-compact'),
+        'session-end': () => onSafetyNote(input, at, 'session-end'),
+      };
       return handlers[event]?.() ?? '';
     } catch (e) {
       if (process.env.PM_DEBUG) console.error(e);
