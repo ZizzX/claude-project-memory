@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -11,6 +12,7 @@ import { writeBoard } from './lib/board.mjs';
 import { buildSummary } from './lib/summary.mjs';
 import { scanPlans } from './lib/scan.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
+import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -164,6 +166,30 @@ Re-run with --yes to proceed.`;
   _push(cwd, [pm]) {
     pushNow(pm);
     return '';
+  },
+
+  // Hooks must never break a session: every path returns normally, errors are swallowed.
+  hook(cwd, [event]) {
+    let input = {};
+    try {
+      input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+    } catch {
+      // no or malformed stdin
+    }
+    const at = input.cwd || cwd;
+    const handlers = {
+      'session-start': () => onSessionStart(input, at),
+      'post-tool-use': () => onPostToolUse(input, at),
+      stop: () => onStop(input, at),
+      'pre-compact': () => onSafetyNote(input, at, 'pre-compact'),
+      'session-end': () => onSafetyNote(input, at, 'session-end'),
+    };
+    try {
+      return handlers[event]?.() ?? '';
+    } catch (e) {
+      if (process.env.PM_DEBUG) console.error(e);
+      return '';
+    }
   },
 
   summary(cwd) {
