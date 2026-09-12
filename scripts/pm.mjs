@@ -8,6 +8,7 @@ import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate }
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
 import { buildSummary } from './lib/summary.mjs';
+import { scanPlans } from './lib/scan.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -111,6 +112,11 @@ const commands = {
     const pm = requireBoard(cwd);
     writeBoard(pm);
     return path.join(pm, 'board.html');
+  },
+
+  scan(cwd) {
+    requireBoard(cwd);
+    return scanPlans(cwd).map((p) => `${p.done}/${p.total}  ${p.path}`).join('\n') || '(no plans found)';
   },
 
   summary(cwd) {
