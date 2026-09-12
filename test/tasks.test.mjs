@@ -65,3 +65,37 @@ test('appendLog adds signed entries and lastNext reads the latest model entry', 
   assert.match(t.body, /## Log\n- 2026-09-12 · wt-a · did: parser · next: empty rows\n- 2026-09-13 · wt-a · auto:/);
   assert.deepEqual(lastNext(t), { date: '2026-09-14', who: 'wt-b', next: 'handle BOM · then docs' });
 });
+
+test('newTask retries on EEXIST (concurrent id collision)', () => {
+  const pm = tmp();
+
+  // Create T-001 first
+  const first = newTask(pm, { title: 'first', date: D });
+  assert.equal(first.id, 'T-001');
+
+  // Save the real fs.openSync
+  const realOpenSync = fs.openSync;
+
+  // Track calls to openSync with 'wx' flag for T-002
+  let collisionThrown = false;
+  fs.openSync = function(file, flags, ...args) {
+    if (flags === 'wx' && file.endsWith('T-002.md') && !collisionThrown) {
+      collisionThrown = true;
+      const err = new Error('File exists');
+      err.code = 'EEXIST';
+      throw err;
+    }
+    return realOpenSync.apply(this, [file, flags, ...args]);
+  };
+
+  try {
+    // This should encounter EEXIST for T-002, then retry and succeed with T-003
+    const second = newTask(pm, { title: 'second', date: D });
+    assert.equal(second.id, 'T-003');
+    assert.ok(fs.existsSync(path.join(pm, 'tasks', 'T-003.md')));
+    const t = readTask(pm, 'T-003');
+    assert.equal(t.data.id, 'T-003');
+  } finally {
+    fs.openSync = realOpenSync;
+  }
+});
