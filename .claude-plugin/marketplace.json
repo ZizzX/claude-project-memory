@@ -1,0 +1,11 @@
+{
+  "name": "project-memory",
+  "owner": { "name": "ZizzX" },
+  "plugins": [
+    {
+      "name": "project-memory",
+      "source": "./",
+      "description": "Per-project plan, task board, decision log and session handoff for Claude Code."
+    }
+  ]
+}
