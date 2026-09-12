@@ -37,7 +37,8 @@ function requireBoard(cwd) {
 
 const conflictHelp = (pm) => `sync conflict in: ${(conflictFiles(pm) ?? []).join(', ') || 'unknown files'}
 nothing was discarded. To resolve: cd "${pm}" && git pull --rebase origin pm (first sync: git merge origin/pm),
-fix the listed files, git add -A, then git rebase --continue (or git commit), then run: pm sync`;
+fix the listed files, git add -A, then git rebase --continue (or git commit), then run: pm sync
+If git still reports a lock, delete ${path.join(pm, '.git', 'index.lock')} — safe once no pm command is running.`;
 
 const commands = {
   init(cwd) {

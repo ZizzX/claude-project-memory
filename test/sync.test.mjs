@@ -100,4 +100,16 @@ test('offline remote: sync reports offline, exits 0, keeps local commits', () =>
   assert.equal(r.code, 0);
   assert.match(r.out, /offline/);
   assert.equal(sh(['log', '-1', '--format=%s'], pmDir(root)), 'pm: task new T-001');
+  assert.equal(fs.existsSync(path.join(pmDir(root), '.state', 'conflict')), false, 'a network failure must never look like a conflict');
+});
+
+test('a stale index.lock left by a killed sync is removed, not left broken forever', () => {
+  const { root } = project();
+  cli(['init'], root);
+  cli(['sync', 'on', '--yes'], root);
+  const lock = path.join(pmDir(root), '.git', 'index.lock');
+  fs.writeFileSync(lock, ''); // simulate a git process killed mid-write, no operation actually in progress
+  const r = cli(['sync'], root);
+  assert.equal(r.code, 0);
+  assert.equal(fs.existsSync(lock), false);
 });

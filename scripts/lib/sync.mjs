@@ -12,11 +12,22 @@ export const syncTarget = (cwd, remote) => remote || tryGit(['remote', 'get-url'
 // Local-only check: a normal `git fetch` of the project brings refs/remotes/origin/pm.
 export const sharedBoardHint = (cwd) => tryGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/pm'], cwd) !== null;
 
-function recordConflict(pm, op) {
-  const files = tryGit(['diff', '--name-only', '--diff-filter=U'], pm) ?? '';
+function recordConflict(pm, op, files) {
   tryGit([op, '--abort'], pm); // keep local commits; nothing is discarded
   fs.mkdirSync(path.dirname(conflictPath(pm)), { recursive: true });
   fs.writeFileSync(conflictPath(pm), files);
+}
+
+// A git process killed mid-write (e.g. by pull's timeout) can leave a stale index.lock
+// behind. Safe to remove once no rebase/merge is actually in progress any more — this
+// is always the board repo (`pm`), never the project's own repo.
+function clearStaleLock(pm) {
+  const dotgit = path.join(pm, '.git');
+  const busy = fs.existsSync(path.join(dotgit, 'rebase-merge'))
+    || fs.existsSync(path.join(dotgit, 'rebase-apply'))
+    || fs.existsSync(path.join(dotgit, 'MERGE_HEAD'));
+  const lock = path.join(dotgit, 'index.lock');
+  if (!busy && fs.existsSync(lock)) fs.rmSync(lock, { force: true });
 }
 
 export function conflictFiles(pm) {
@@ -41,7 +52,8 @@ export function syncOn(cwd, url) {
     try {
       git([...identityArgs(pm), 'merge', '-q', '--allow-unrelated-histories', '-m', 'pm: merge shared board', 'origin/pm'], pm);
     } catch {
-      recordConflict(pm, 'merge');
+      const files = tryGit(['diff', '--name-only', '--diff-filter=U'], pm) ?? '';
+      recordConflict(pm, 'merge', files);
       return { pm, mode: 'merged', conflict: true };
     }
   }
@@ -59,14 +71,23 @@ export function pull(pm, timeout = 5000) {
   try {
     git([...identityArgs(pm), 'pull', '-q', '--rebase', '--autostash', 'origin', 'pm'], pm, { timeout });
     fs.rmSync(conflictPath(pm), { force: true });
+    clearStaleLock(pm); // e.g. a lock left by an earlier killed process, with nothing to do this time
     return 'ok';
   } catch {
     const dotgit = path.join(pm, '.git');
-    if (fs.existsSync(path.join(dotgit, 'rebase-merge')) || fs.existsSync(path.join(dotgit, 'rebase-apply'))) {
-      recordConflict(pm, 'rebase');
-      return 'conflict';
+    const rebasing = fs.existsSync(path.join(dotgit, 'rebase-merge')) || fs.existsSync(path.join(dotgit, 'rebase-apply'));
+    let result = 'offline';
+    if (rebasing) {
+      const files = tryGit(['diff', '--name-only', '--diff-filter=U'], pm) ?? '';
+      if (files) {
+        recordConflict(pm, 'rebase', files);
+        result = 'conflict';
+      } else {
+        tryGit(['rebase', '--abort'], pm); // interrupted (e.g. a killed timeout), not a real conflict
+      }
     }
-    return 'offline';
+    clearStaleLock(pm);
+    return result;
   }
 }
 
