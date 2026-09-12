@@ -2899,7 +2899,7 @@ Expected: the summary lists four tasks, T-001 ready.
 
 Ask the owner to run in Claude Code:
 ```
-/plugin marketplace add C:\Users\Aziz\orca\workspaces\ai-memory\ai-agent-memory-system
+/plugin marketplace add C:\Users\USER\orca\workspaces\ai-memory\ai-agent-memory-system
 /plugin install project-memory@project-memory
 ```
 then start a new session in this worktree.
