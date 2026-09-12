@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { pmDir, worktreeName, today } from './lib/paths.mjs';
+import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate } from './lib/tasks.mjs';
+import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate, parseOrder } from './lib/tasks.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
 import { buildSummary } from './lib/summary.mjs';
@@ -56,7 +56,7 @@ const commands = {
     const pm = requireBoard(cwd);
     const t = newTask(pm, {
       title: v.title,
-      order: v.order === undefined ? undefined : Number(v.order),
+      order: v.order === undefined ? undefined : parseOrder(v.order),
       deps: list(v.deps),
       milestone: v.milestone ?? '',
       links: list(v.links),
@@ -144,8 +144,10 @@ Re-run with --yes to proceed.`;
       if (memorySyncEnabled(cwd)) {
         const m = linkMemory(cwd, r.pm);
         persist(r.pm, 'pm: link memory');
-        mem = `\nmemory linked${m.moved.length ? ` (moved: ${m.moved.join(', ')})` : ''}`
-          + `${m.clashes.length ? `; clashes kept as <name>.${os.hostname()}.md: ${m.clashes.join(', ')}` : ''}`;
+        mem = m.linked
+          ? `\nmemory linked${m.moved.length ? ` (moved: ${m.moved.join(', ')})` : ''}`
+            + `${m.clashes.length ? `; clashes kept as <name>.${os.hostname()}.md: ${m.clashes.join(', ')}` : ''}`
+          : `\nmemory NOT linked: ${memoryDir(cwd)} is already a link elsewhere`;
       }
       return (r.conflict ? conflictHelp(r.pm) : `sync on (${r.mode}): ${url} branch pm`) + mem;
     }

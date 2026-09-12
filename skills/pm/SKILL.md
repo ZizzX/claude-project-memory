@@ -41,6 +41,7 @@ dependencies `done`/`dropped`. A task fits one branch/PR; fine-grained steps liv
 | No board yet and non-trivial multi-step work starts | `pm init`, fill `PLAN.md` (goal, milestones, focus), `pm scan` and import old plans (all boxes ticked → done, some → in_progress, none → todo). Announce it in the board diff line. |
 | "enable board sync" / "connect the board" | Run `pm sync on` (no `--yes`) and show the user where the board and memory will be pushed. Only after the user says yes: `pm sync on --yes`. Never enable sync on your own initiative. |
 | "disable board sync" | `pm sync off`. |
+| "stop syncing my memory" | `git config pm.syncMemory false` only stops *future* linking — it does not undo an already-active link. Tell the user this, then do it manually: move `pm/memory` back to `<claude-home>/projects/<repo-key>/memory` and remove the link/junction. |
 | `[pm] sync conflict …` in the summary | Run `pm sync`, follow its instructions, merge the listed markdown files by hand keeping both sides' information, then `pm sync` again. |
 | `[pm] Code changed but the board was not updated …` (Stop hook) | Log progress on the active task, or create/claim one, or reply that there is nothing to track. |
 

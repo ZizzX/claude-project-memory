@@ -65,6 +65,8 @@ board; say "connect the board". Nothing is ever connected automatically.
 - With sync on, the board **and the project's auto-memory** are pushed to branch `pm` of the project's
   remote. If that repository is public, they become public — use `pm sync on --remote <private-url>`.
 - Keep memory local while syncing the board: `git config pm.syncMemory false` before enabling sync.
+  This flag is only read when sync turns on — setting it afterwards does not unlink memory that is
+  already synced; undo that by hand (move `pm/memory` back and remove the link).
 - `pm sync off` stops syncing and keeps the local board.
 
 ## Coexisting with other memory tools

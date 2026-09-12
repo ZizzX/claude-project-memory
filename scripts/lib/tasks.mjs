@@ -11,6 +11,12 @@ export const tasksDir = (pm) => path.join(pm, 'tasks');
 const idOf = (n) => `T-${String(n).padStart(3, '0')}`;
 const toArray = (v) => (Array.isArray(v) ? v : v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : []);
 
+export function parseOrder(v) {
+  const n = Number(v);
+  if (Number.isNaN(n)) throw new Error(`order must be a number, got "${v}"`);
+  return n;
+}
+
 function readTaskFile(file) {
   const { data: raw, body } = parse(fs.readFileSync(file, 'utf8'));
   const data = {
@@ -85,9 +91,7 @@ export function setFields(pm, id, fields, date) {
     if (k === 'id') throw new Error('id cannot be changed');
     if (k === 'status' && !STATUSES.includes(v)) throw new Error(`bad status "${v}"; use ${STATUSES.join(' | ')}`);
     if (k === 'order') {
-      const n = Number(v);
-      if (Number.isNaN(n)) throw new Error(`order must be a number, got "${v}"`);
-      task.data.order = n;
+      task.data.order = parseOrder(v);
     } else if (LIST_FIELDS.includes(k)) {
       task.data[k] = toArray(v);
     } else {

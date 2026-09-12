@@ -36,6 +36,20 @@ test('sync on moves existing memory into the board and links it', () => {
   assert.equal(sh(['log', '-1', '--format=%s'], pm), 'pm: link memory');
 });
 
+test('sync on reports honestly when memory is already linked elsewhere', () => {
+  const root = project();
+  const mem = memoryDir(root);
+  const elsewhere = tmp('pm-elsewhere-');
+  fs.mkdirSync(path.dirname(mem), { recursive: true });
+  fs.symlinkSync(elsewhere, mem, 'junction');
+  cli(['init'], root);
+
+  const out = cli(['sync', 'on', '--yes'], root).out;
+  assert.match(out, /memory NOT linked: .*is already a link elsewhere/);
+  assert.doesNotMatch(out, /memory linked/);
+  assert.equal(fs.realpathSync(mem), fs.realpathSync(elsewhere)); // untouched
+});
+
 test('pm.syncMemory=false leaves memory untouched', () => {
   const root = project();
   const mem = memoryDir(root);

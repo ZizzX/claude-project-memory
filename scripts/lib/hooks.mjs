@@ -80,7 +80,13 @@ export function onSessionStart(input, cwd) {
   if (isSyncOn(pm)) {
     commitPm(pm, 'pm: session start');
     if (pull(pm) === 'conflict') status = `[pm] sync conflict in ${(conflictFiles(pm) ?? []).join(', ')} — run: pm sync`;
-    if (memorySyncEnabled(cwd)) linkMemory(cwd, pm);
+    if (memorySyncEnabled(cwd)) {
+      try {
+        linkMemory(cwd, pm);
+      } catch (e) {
+        if (!status) status = `[pm] memory link check failed: ${e.message}`;
+      }
+    }
     const unpushed = unpushedOverDay(pm);
     if (!status && unpushed) status = `[pm] ${unpushed} board commits not pushed for over a day — run: pm sync`;
   }

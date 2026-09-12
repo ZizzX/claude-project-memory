@@ -45,6 +45,15 @@ test('cli: errors exit 1 with a message', () => {
   assert.match(v.out, /depends on unknown T-404/);
 });
 
+test('cli: task new rejects a non-numeric --order instead of storing NaN', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  const bad = cli(['task', 'new', '--title', 'x', '--order', 'first'], root);
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /order must be a number/);
+  assert.equal(fs.existsSync(path.join(pmDir(root), 'tasks', 'T-001.md')), false);
+});
+
 test('cli: concurrent task creation never reuses an id', async () => {
   const { root } = setup();
   cli(['init'], root);

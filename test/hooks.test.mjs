@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setup, tmp, sh, cli } from './helpers.mjs';
-import { pmDir } from '../scripts/lib/paths.mjs';
+import { pmDir, memoryDir } from '../scripts/lib/paths.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote, STALE_MINUTES } from '../scripts/lib/hooks.mjs';
 
 const MIN = 60_000;
@@ -29,6 +29,23 @@ test('session start prints the summary, records state, surfaces problems', () =>
   cli(['task', 'new', '--title', 'x'], root);
   cli(['set', 'T-001', 'depends_on=T-404'], root);
   assert.match(onSessionStart({ session_id: 'abc' }, root), /board problems: T-001: depends on unknown T-404/);
+});
+
+test('session start: a broken memory link cannot swallow the summary', () => {
+  const { root } = setup();
+  const remote = tmp('pm-remote-');
+  sh(['init', '-q', '--bare', '-b', 'main'], remote);
+  sh(['remote', 'add', 'origin', remote], root);
+  cli(['init'], root);
+  cli(['sync', 'on', '--yes'], root); // links memory for real first
+  const mem = memoryDir(root);
+  fs.unlinkSync(mem); // drop the junction itself, leave its target behind
+  fs.symlinkSync(path.join(path.dirname(mem), 'nowhere'), mem, 'junction'); // now dangling
+  const out = onSessionStart({ session_id: 'zz' }, root);
+  assert.match(out, /^\[pm\] /);
+  assert.match(out, /memory link check failed/);
+  assert.match(out, /\nRules:/, 'the full summary still gets built, not just the status line');
+  assert.ok(fs.existsSync(path.join(pmDir(root), '.state', 'session-zz.json')), 'state is still recorded');
 });
 
 test('post-tool-use: plan files nudge, pm files rebuild the board, others are ignored', () => {
