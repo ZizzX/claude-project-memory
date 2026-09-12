@@ -128,3 +128,37 @@ export function lastNext(task) {
   const [date, who] = last.replace(/^- /, '').split(' · ');
   return { date, who, next: last.slice(last.indexOf(' · next: ') + ' · next: '.length) };
 }
+
+export function readyQueue(tasks) {
+  const status = new Map(tasks.map((t) => [t.id, t.data.status]));
+  return tasks
+    .filter((t) => t.data.status === 'todo' && t.data.depends_on.every((d) => ['done', 'dropped'].includes(status.get(d))))
+    .sort((a, b) => a.data.order - b.data.order || a.id.localeCompare(b.id));
+}
+
+export function validate(tasks) {
+  const problems = [];
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  for (const t of tasks) {
+    if (t.data.id !== t.id) problems.push(`${t.id}: frontmatter id is ${t.data.id}`);
+    if (!STATUSES.includes(t.data.status)) problems.push(`${t.id}: bad status "${t.data.status}"`);
+    if (t.data.status === 'waiting' && !t.data.waiting_on) problems.push(`${t.id}: waiting without waiting_on`);
+    for (const d of t.data.depends_on) {
+      if (!byId.has(d)) problems.push(`${t.id}: depends on unknown ${d}`);
+      else if (byId.get(d).data.status === 'dropped') problems.push(`${t.id}: depends on dropped ${d}`);
+    }
+  }
+  const state = new Map(); // 1 = on the current path, 2 = finished
+  const visit = (id, trail) => {
+    if (!byId.has(id) || state.get(id) === 2) return;
+    if (state.get(id) === 1) {
+      problems.push(`cycle: ${[...trail.slice(trail.indexOf(id)), id].join(' -> ')}`);
+      return;
+    }
+    state.set(id, 1);
+    for (const d of byId.get(id).data.depends_on) visit(d, [...trail, id]);
+    state.set(id, 2);
+  };
+  for (const t of tasks) visit(t.id, []);
+  return problems;
+}
