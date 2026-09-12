@@ -120,7 +120,50 @@ export function isLink(p) {
 
 export const memorySyncEnabled = (cwd) => tryGit(['config', '--get', 'pm.syncMemory'], cwd) !== 'false';
 
-// Moves Claude Code's auto-memory into pm/memory and leaves a link in its place. Never deletes data.
+// First unused "<base>.<host>[-N]<ext>" path in dir — never a path that already exists.
+function freeDest(dir, name) {
+  const ext = path.extname(name);
+  const base = path.basename(name, ext);
+  const host = os.hostname();
+  let n = 1;
+  let dest = path.join(dir, `${base}.${host}${ext}`);
+  while (fs.existsSync(dest)) dest = path.join(dir, `${base}.${host}-${++n}${ext}`);
+  return dest;
+}
+
+// Copies every entry of fromDir into toDir (both already exist), never overwriting anything
+// already in toDir: identical files are skipped, a same-named subdirectory is merged
+// recursively with these same rules, and any other clash (differing files, or a file meeting
+// a directory) is copied in full under a fresh host-suffixed name. `label` prefixes reported
+// paths so nested clashes/moves read as "sub/dir/name".
+function mergeCopy(fromDir, toDir, result, label = '') {
+  for (const name of fs.readdirSync(fromDir)) {
+    const from = path.join(fromDir, name);
+    const to = path.join(toDir, name);
+    const tag = label ? `${label}/${name}` : name;
+    if (!fs.existsSync(to)) {
+      fs.cpSync(from, to, { recursive: true, force: false });
+      result.moved.push(tag);
+      continue;
+    }
+    const fromIsDir = fs.statSync(from).isDirectory();
+    const toIsDir = fs.statSync(to).isDirectory();
+    if (fromIsDir && toIsDir) {
+      mergeCopy(from, to, result, tag); // merge in place — never a clash, never duplicated
+      continue;
+    }
+    if (!fromIsDir && !toIsDir && fs.readFileSync(from).equals(fs.readFileSync(to))) continue; // already there
+    const dest = freeDest(toDir, name);
+    if (fs.existsSync(dest)) throw new Error(`memory sync: refusing to overwrite ${dest}`); // must never happen
+    fs.cpSync(from, dest, { recursive: true, force: false });
+    result.clashes.push(tag);
+    result.moved.push(label ? `${label}/${path.basename(dest)}` : path.basename(dest));
+  }
+}
+
+// Moves Claude Code's auto-memory into pm/memory and leaves a link in its place. Never deletes
+// or overwrites data: every entry is copied into the board first, and only once the whole copy
+// loop has finished is the original folder removed.
 export function linkMemory(cwd, pm) {
   const link = memoryDir(cwd);
   const target = path.join(pm, 'memory');
@@ -131,18 +174,7 @@ export function linkMemory(cwd, pm) {
     return result;
   }
   if (fs.existsSync(link)) {
-    for (const name of fs.readdirSync(link)) {
-      const from = path.join(link, name);
-      let to = path.join(target, name);
-      if (fs.existsSync(to)) {
-        if (fs.statSync(from).isFile() && fs.readFileSync(from).equals(fs.readFileSync(to))) continue;
-        const ext = path.extname(name);
-        to = path.join(target, `${path.basename(name, ext)}.${os.hostname()}${ext}`);
-        result.clashes.push(name);
-      }
-      fs.cpSync(from, to, { recursive: true });
-      result.moved.push(name);
-    }
+    mergeCopy(link, target, result);
     fs.rmSync(link, { recursive: true }); // only after every entry was copied
   }
   fs.mkdirSync(path.dirname(link), { recursive: true });

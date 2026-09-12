@@ -55,3 +55,61 @@ test('linkMemory is idempotent and creates a missing link', () => {
   assert.deepEqual(linkMemory(root, pm), { linked: true, moved: [], clashes: [] });
   assert.equal(isLink(memoryDir(root)), true);
 });
+
+test('re-running the copy loop never overwrites already-moved content', () => {
+  const root = project();
+  const mem = memoryDir(root);
+  fs.mkdirSync(mem, { recursive: true });
+  fs.writeFileSync(path.join(mem, 'a.md'), 'local v1\n');
+  cli(['init'], root);
+  const pm = pmDir(root);
+  fs.mkdirSync(path.join(pm, 'memory'));
+  fs.writeFileSync(path.join(pm, 'memory', 'a.md'), 'board a\n');
+
+  const r1 = linkMemory(root, pm);
+  assert.deepEqual(r1.clashes, ['a.md']);
+  const hostFile = path.join(pm, 'memory', `a.${os.hostname()}.md`);
+  assert.equal(fs.readFileSync(hostFile, 'utf8'), 'local v1\n');
+  assert.equal(isLink(mem), true);
+
+  // Simulate an interrupted retry: remove just the link (the copy already landed in the
+  // board) and put back a source folder whose file differs yet again.
+  fs.rmSync(mem, { recursive: true });
+  fs.mkdirSync(mem, { recursive: true });
+  fs.writeFileSync(path.join(mem, 'a.md'), 'local v2\n');
+
+  const r2 = linkMemory(root, pm);
+  assert.deepEqual(r2.clashes, ['a.md']);
+  // nothing already in the board was touched by the retry
+  assert.equal(fs.readFileSync(hostFile, 'utf8'), 'local v1\n');
+  assert.equal(fs.readFileSync(path.join(pm, 'memory', 'a.md'), 'utf8'), 'board a\n');
+  // the newly differing content sits beside it under a fresh name
+  assert.equal(fs.readFileSync(path.join(pm, 'memory', `a.${os.hostname()}-2.md`), 'utf8'), 'local v2\n');
+});
+
+test('directory entries are merged, not duplicated', () => {
+  const root = project();
+  const mem = memoryDir(root);
+  fs.mkdirSync(path.join(mem, 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(mem, 'sub', 'same.md'), 'same content\n');
+  fs.writeFileSync(path.join(mem, 'sub', 'diff.md'), 'local diff\n');
+  cli(['init'], root);
+  const pm = pmDir(root);
+  fs.mkdirSync(path.join(pm, 'memory', 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(pm, 'memory', 'sub', 'same.md'), 'same content\n');
+  fs.writeFileSync(path.join(pm, 'memory', 'sub', 'diff.md'), 'board diff\n');
+
+  const r = linkMemory(root, pm);
+  assert.deepEqual(r.clashes, ['sub/diff.md']); // the identical file is not a clash
+  assert.deepEqual(
+    fs.readdirSync(path.join(pm, 'memory')).sort(),
+    ['sub'], // merged into the existing "sub", not duplicated as a second directory
+  );
+  assert.deepEqual(
+    fs.readdirSync(path.join(pm, 'memory', 'sub')).sort(),
+    ['diff.md', `diff.${os.hostname()}.md`, 'same.md'].sort(),
+  );
+  assert.equal(fs.readFileSync(path.join(pm, 'memory', 'sub', 'same.md'), 'utf8'), 'same content\n');
+  assert.equal(fs.readFileSync(path.join(pm, 'memory', 'sub', 'diff.md'), 'utf8'), 'board diff\n');
+  assert.equal(fs.readFileSync(path.join(pm, 'memory', 'sub', `diff.${os.hostname()}.md`), 'utf8'), 'local diff\n');
+});
