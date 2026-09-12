@@ -1,6 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { git, tryGit, pmDir, today } from './paths.mjs';
+import { git, tryGit, pmDir, memoryDir, today } from './paths.mjs';
 import { hasBoard, initBoard, identityArgs } from './store.mjs';
 import { writeBoard } from './board.mjs';
 
@@ -105,4 +106,47 @@ export function unpushedOverDay(pm, now = Date.now()) {
   if (!out) return 0;
   const stamps = out.split('\n').map(Number);
   return now - Math.min(...stamps) * 1000 > 86_400_000 ? stamps.length : 0;
+}
+
+// readlink succeeds for symlinks and for Windows directory junctions.
+export function isLink(p) {
+  try {
+    fs.readlinkSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const memorySyncEnabled = (cwd) => tryGit(['config', '--get', 'pm.syncMemory'], cwd) !== 'false';
+
+// Moves Claude Code's auto-memory into pm/memory and leaves a link in its place. Never deletes data.
+export function linkMemory(cwd, pm) {
+  const link = memoryDir(cwd);
+  const target = path.join(pm, 'memory');
+  fs.mkdirSync(target, { recursive: true });
+  const result = { linked: false, moved: [], clashes: [] };
+  if (isLink(link)) {
+    result.linked = fs.realpathSync(link) === fs.realpathSync(target); // a link elsewhere is left alone
+    return result;
+  }
+  if (fs.existsSync(link)) {
+    for (const name of fs.readdirSync(link)) {
+      const from = path.join(link, name);
+      let to = path.join(target, name);
+      if (fs.existsSync(to)) {
+        if (fs.statSync(from).isFile() && fs.readFileSync(from).equals(fs.readFileSync(to))) continue;
+        const ext = path.extname(name);
+        to = path.join(target, `${path.basename(name, ext)}.${os.hostname()}${ext}`);
+        result.clashes.push(name);
+      }
+      fs.cpSync(from, to, { recursive: true });
+      result.moved.push(name);
+    }
+    fs.rmSync(link, { recursive: true }); // only after every entry was copied
+  }
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.symlinkSync(target, link, 'junction');
+  result.linked = true;
+  return result;
 }

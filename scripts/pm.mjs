@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
 import { buildSummary } from './lib/summary.mjs';
 import { scanPlans } from './lib/scan.mjs';
-import { syncTarget, syncOn, syncOff, pushNow, conflictFiles } from './lib/sync.mjs';
+import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -137,7 +138,14 @@ Re-run with --yes to proceed.`;
       }
       if (hasBoard(cwd)) commitPm(pmDir(cwd), 'pm: before sync on');
       const r = syncOn(cwd, url);
-      return r.conflict ? conflictHelp(r.pm) : `sync on (${r.mode}): ${url} branch pm`;
+      let mem = '';
+      if (memorySyncEnabled(cwd)) {
+        const m = linkMemory(cwd, r.pm);
+        persist(r.pm, 'pm: link memory');
+        mem = `\nmemory linked${m.moved.length ? ` (moved: ${m.moved.join(', ')})` : ''}`
+          + `${m.clashes.length ? `; clashes kept as <name>.${os.hostname()}.md: ${m.clashes.join(', ')}` : ''}`;
+      }
+      return (r.conflict ? conflictHelp(r.pm) : `sync on (${r.mode}): ${url} branch pm`) + mem;
     }
     if (sub === 'off') {
       syncOff(requireBoard(cwd));
