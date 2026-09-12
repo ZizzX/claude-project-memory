@@ -22,6 +22,15 @@ starts knowing where work stopped and what the next step is.
 /plugin install project-memory@project-memory
 ```
 
+## Update
+
+```
+/plugin marketplace update project-memory
+/plugin update project-memory@project-memory
+```
+
+Then fully restart Claude Code (a new process, not `/clear`) so the new hooks are loaded.
+
 ## Use
 
 Just work. In a repo with a board, every session starts with a summary like:
@@ -82,6 +91,17 @@ by the board automatically.
 node --test                          # run all tests
 claude --plugin-dir .                # try the plugin without installing
 ```
+
+To get a change into a plugin installed from a local checkout (`/plugin marketplace add <path>`):
+
+1. Bump `version` in `.claude-plugin/plugin.json` and commit. `plugin update` compares only the
+   version, not the commit: with an unchanged version it reports "already at the latest version"
+   and copies nothing.
+2. Put the commit on the branch that checkout has checked out, e.g. `git merge --ff-only <branch>`.
+3. Run the two commands from [Update](#update) (from a shell: `claude plugin marketplace update
+   project-memory` and `claude plugin update project-memory@project-memory`), then restart.
+4. Check `~/.claude/plugins/installed_plugins.json`: the entry shows the installed `version` and
+   `gitCommitSha`.
 
 ## License
 
