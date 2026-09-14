@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tryGit, pmDir, worktreeName, today } from './paths.mjs';
-import { hasBoard, commitPm, isSyncOn, persist } from './store.mjs';
+import { hasBoard, commitPm, isSyncOn, persist, readState, writeState } from './store.mjs';
 import { listTasks, appendLogLine, validate } from './tasks.mjs';
 import { writeBoard } from './board.mjs';
 import { buildSummary } from './summary.mjs';
@@ -19,19 +19,6 @@ export const PLAN_PATTERNS = [
 ];
 const PM_SCRIPT = fileURLToPath(new URL('../pm.mjs', import.meta.url));
 const HINT = '[pm] this repo has a shared board (branch pm) — say "connect the board" to use it';
-
-const stateFile = (pm, name) => path.join(pm, '.state', `${String(name).replace(/[^\w.-]/g, '_')}.json`);
-function readState(pm, name) {
-  try {
-    return JSON.parse(fs.readFileSync(stateFile(pm, name), 'utf8'));
-  } catch {
-    return {};
-  }
-}
-function writeState(pm, name, value) {
-  fs.mkdirSync(path.join(pm, '.state'), { recursive: true });
-  fs.writeFileSync(stateFile(pm, name), JSON.stringify(value));
-}
 
 const norm = (p) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
 const inside = (file, dir) => norm(file).startsWith(norm(dir) + path.sep);

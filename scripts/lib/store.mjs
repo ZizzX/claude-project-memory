@@ -48,6 +48,42 @@ export function persist(pm, message, tasks) {
   if (commitPm(pm, message) && isSyncOn(pm)) backgroundPush(pm);
 }
 
+const stateFile = (pm, name) => path.join(pm, '.state', `${String(name).replace(/[^\w.-]/g, '_')}.json`);
+
+export function readState(pm, name) {
+  try {
+    return JSON.parse(fs.readFileSync(stateFile(pm, name), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+export function writeState(pm, name, value) {
+  fs.mkdirSync(path.join(pm, '.state'), { recursive: true });
+  fs.writeFileSync(stateFile(pm, name), JSON.stringify(value));
+}
+
+// The Stop nudge compares board-file mtimes. An automatic write (commit capture) records the mtime it replaced,
+// so the nudge keeps seeing the last manual update. Restoring the old mtime instead would hide the change from
+// git's index when the size is unchanged.
+const AUTO_MTIME = 'auto-mtime';
+
+export function autoWrite(pm, file, write) {
+  const auto = readState(pm, AUTO_MTIME);
+  const name = path.basename(file);
+  const current = fs.statSync(file).mtimeMs;
+  const before = auto[name]?.after === current ? auto[name].before : current;
+  write();
+  auto[name] = { before, after: fs.statSync(file).mtimeMs };
+  writeState(pm, AUTO_MTIME, auto);
+}
+
+export function manualMtime(pm, file) {
+  const mtime = fs.statSync(file).mtimeMs;
+  const auto = readState(pm, AUTO_MTIME)[path.basename(file)];
+  return auto?.after === mtime ? auto.before : mtime;
+}
+
 export function initBoard(cwd, date) {
   const pm = pmDir(cwd);
   if (!pm) throw new Error('not inside a git repository');

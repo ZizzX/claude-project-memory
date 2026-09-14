@@ -5,7 +5,7 @@ import { parse, serialize } from './frontmatter.mjs';
 export const STATUSES = ['todo', 'in_progress', 'waiting', 'done', 'dropped'];
 const ID_RE = /^T-(\d+)\.md$/;
 const TEMPLATE_BODY = '## Goal\n\n## Understanding\n\n## Checklist\n\n## Log\n';
-const LIST_FIELDS = ['depends_on', 'worktrees', 'links'];
+const LIST_FIELDS = ['depends_on', 'worktrees', 'links', 'commits'];
 
 export const tasksDir = (pm) => path.join(pm, 'tasks');
 const idOf = (n) => `T-${String(n).padStart(3, '0')}`;
@@ -29,6 +29,8 @@ function readTaskFile(file) {
     milestone: raw.milestone ?? '',
     epic: String(raw.epic ?? '').trim(),
   };
+  // Optional fields stay absent when unset, so files written before them never grow new lines.
+  if (raw.commits !== undefined) data.commits = toArray(raw.commits);
   return { file, id: path.basename(file, '.md'), data, body };
 }
 
@@ -109,10 +111,10 @@ export function setFields(pm, id, fields, date) {
   return task;
 }
 
-export function claim(pm, id, worktree, date) {
+export function claim(pm, id, worktree, date, branch = '') {
   const task = readTask(pm, id);
   const worktrees = [...new Set([...task.data.worktrees, worktree])];
-  return setFields(pm, id, { status: 'in_progress', worktrees }, date);
+  return setFields(pm, id, { status: 'in_progress', worktrees, ...(branch && { branch }) }, date);
 }
 
 // Log is the last section of a task file, so entries are appended at the end of the body.

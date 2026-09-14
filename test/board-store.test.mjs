@@ -6,7 +6,7 @@ import { tmp, setup, sh } from './helpers.mjs';
 import { newTask, setFields, claim, appendLog, listTasks } from '../scripts/lib/tasks.mjs';
 import { planFile, planTemplate } from '../scripts/lib/plan.mjs';
 import { columns, writeBoard } from '../scripts/lib/board.mjs';
-import { initBoard, hasBoard, commitPm, isSyncOn } from '../scripts/lib/store.mjs';
+import { initBoard, hasBoard, commitPm, isSyncOn, autoWrite, manualMtime } from '../scripts/lib/store.mjs';
 
 const D = '2026-09-12';
 
@@ -63,4 +63,21 @@ test('commitPm commits only when something changed', () => {
   fs.appendFileSync(path.join(pm, 'decisions.md'), 'x\n');
   assert.equal(commitPm(pm, 'pm: edit'), true);
   assert.equal(sh(['log', '-1', '--format=%s'], pm), 'pm: edit');
+});
+
+test('manualMtime sees past automatic writes but not past a later manual one', () => {
+  const pm = tmp();
+  const file = path.join(pm, 'T-001.md');
+  fs.writeFileSync(file, 'a');
+  const past = new Date(Date.now() - 3_600_000);
+  fs.utimesSync(file, past, past);
+  const original = fs.statSync(file).mtimeMs;
+  autoWrite(pm, file, () => fs.writeFileSync(file, 'ab'));
+  autoWrite(pm, file, () => fs.writeFileSync(file, 'abc')); // a second automatic write keeps the first "before"
+  assert.equal(manualMtime(pm, file), original);
+  fs.writeFileSync(file, 'manual');
+  const later = new Date(Date.now() + 5_000); // explicit, so a coarse-mtime filesystem cannot tie with "after"
+  fs.utimesSync(file, later, later);
+  assert.equal(manualMtime(pm, file), fs.statSync(file).mtimeMs);
+  assert.equal(manualMtime(tmp(), file), fs.statSync(file).mtimeMs, 'no record: the real mtime');
 });

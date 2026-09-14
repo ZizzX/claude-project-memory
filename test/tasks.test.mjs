@@ -99,3 +99,18 @@ test('newTask retries on EEXIST (concurrent id collision)', () => {
     fs.openSync = realOpenSync;
   }
 });
+
+test('claim writes the branch only when there is one; commits is an optional list', () => {
+  const pm = tmp();
+  newTask(pm, { title: 'x', date: D });
+  newTask(pm, { title: 'y', date: D });
+  claim(pm, 'T-001', 'wt-a', D, 'feat/x');
+  claim(pm, 'T-002', 'wt-a', D); // detached HEAD: no branch
+  assert.equal(readTask(pm, 'T-001').data.branch, 'feat/x');
+  const plain = fs.readFileSync(path.join(pm, 'tasks', 'T-002.md'), 'utf8');
+  assert.doesNotMatch(plain, /^(branch|commits|pr):/m, 'unset fields never appear in the file');
+  assert.equal(readTask(pm, 'T-002').data.commits, undefined);
+  setFields(pm, 'T-002', { commits: 'aaaaaaaaaaaa, bbbbbbbbbbbb' }, D);
+  assert.deepEqual(readTask(pm, 'T-002').data.commits, ['aaaaaaaaaaaa', 'bbbbbbbbbbbb']);
+  assert.match(fs.readFileSync(path.join(pm, 'tasks', 'T-002.md'), 'utf8'), /\ncommits: \[aaaaaaaaaaaa, bbbbbbbbbbbb\]\n/);
+});
