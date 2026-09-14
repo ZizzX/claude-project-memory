@@ -27,7 +27,19 @@ const USAGE = `usage: pm <command>
   epics                                        every epic with open/total and its focus line
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
+  help                                         this list, plus what to say to Claude in a session
   hook <event>                                 hook entry point (used by the plugin)`;
+
+const PHRASES = `In a Claude Code session you rarely run these yourself — say it and Claude runs them:
+  "what's next?" / "take the next one"         pick and claim the next ready task of this worktree's epic
+  "break it down"                              turn a large request into tasks (with --epic and a linked plan)
+  "remember …"                                 record a decision, a project fact or a task detail
+  "waiting for …"                              mark the active task blocked, with the reason
+  "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
+  "the plan changes"                           edit PLAN.md, add a Changelog line and a decision
+  "undo T-007"                                 revert that board change
+  "enable board sync" / "connect the board"    opt-in sync across machines (asks before pushing)
+Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme`;
 
 class UsageError extends Error {}
 const fail = (msg) => {
@@ -231,13 +243,18 @@ Re-run with --yes to proceed.`;
     }
   },
 
+  help() {
+    return `${USAGE}\n\n${PHRASES}`;
+  },
+
   summary(cwd) {
     return buildSummary({ pm: requireBoard(cwd), worktree: worktreeName(cwd), scriptPath: SCRIPT });
   },
 };
 
 async function main() {
-  const [cmd, ...args] = process.argv.slice(2);
+  const [arg, ...args] = process.argv.slice(2);
+  const cmd = ['-h', '--help'].includes(arg) ? 'help' : arg;
   const run = Object.hasOwn(commands, cmd) ? commands[cmd] : null;
   if (!run) fail(USAGE);
   const out = await run(process.cwd(), args);

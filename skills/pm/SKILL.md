@@ -24,7 +24,7 @@ not a status; `waiting` is for external blockers and needs `waiting_on`. Ready =
 dependencies `done`/`dropped`. A task fits one branch/PR; fine-grained steps live in a linked plan file.
 `## Log` stays the last section of a task file.
 
-An **epic** is a direction of work: a free key on a task (`--epic ATS-1224` — a Jira epic or ticket key,
+An **epic** is a direction of work: a free key on a task (`--epic PROJ-12` — a Jira/Linear epic or ticket key,
 or a short slug). The summary, `pm ready` and the focus line are narrowed to the epic of the tasks this
 worktree has claimed; a task without an epic is repo-wide and shows in every direction. Never derive the
 epic from a branch or directory name — if the key is unclear, ask. An epic with no open task collapses
@@ -74,6 +74,6 @@ pm log T-003 --did "..." --next "..."           append a Log entry
 pm decision --title T --why W --rejected R [--tasks T-001]
 pm ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), of one epic, or all
 pm epics                                        every epic: open/total and its focus line
-pm validate | pm board | pm summary | pm scan
+pm validate | pm board | pm summary | pm scan | pm help
 pm sync on [--remote url] [--yes] | pm sync off | pm sync
 ```

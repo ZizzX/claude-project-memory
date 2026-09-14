@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+  <title id="t">project-memory: many worktrees, one board</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4338CA"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- worktrees: three branches merging into one board -->
+  <g fill="none" stroke="#fff" stroke-width="24" stroke-linecap="round">
+    <path d="M152 404 C152 322 256 330 256 262"/>
+    <path d="M360 404 C360 322 256 330 256 262"/>
+    <path d="M256 404 V262"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="152" cy="410" r="30"/>
+    <circle cx="256" cy="410" r="30"/>
+    <circle cx="360" cy="410" r="30"/>
+  </g>
+  <g fill="#5B3FD8">
+    <circle cx="152" cy="410" r="12"/>
+    <circle cx="256" cy="410" r="12"/>
+    <circle cx="360" cy="410" r="12"/>
+  </g>
+  <!-- the board: one card with task lines, the first one checked -->
+  <rect x="120" y="84" width="272" height="186" rx="32" fill="#fff"/>
+  <path d="M156 140 l14 14 l26 -28" fill="none" stroke="#16A34A" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="214" y="129" width="142" height="20" rx="10" fill="#4338CA"/>
+  <rect x="156" y="175" width="200" height="20" rx="10" fill="#4338CA" opacity=".45"/>
+  <rect x="156" y="217" width="150" height="20" rx="10" fill="#4338CA" opacity=".22"/>
+</svg>

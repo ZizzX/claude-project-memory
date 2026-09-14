@@ -15,7 +15,7 @@ export function planTemplate(name, date) {
 
 ## Current focus
 
-<!-- One line per epic: "- ATS-1224: what is happening now". Leave other epics' lines alone. -->
+<!-- One line per epic: "- PROJ-12: what is happening now". Leave other epics' lines alone. -->
 
 ## Changelog
 - ${date} · board created

@@ -65,3 +65,16 @@ test('cli: concurrent task creation never reuses an id', async () => {
   assert.equal(files.length, 6);
   assert.equal(cli(['validate'], root).out, 'ok');
 });
+
+test('cli: help lists the commands and the phrases to say, and exits 0', () => {
+  const { root } = setup();
+  for (const arg of ['help', '--help', '-h']) {
+    const r = cli([arg], root);
+    assert.equal(r.code, 0, arg);
+    assert.match(r.out, /^usage: pm <command>\n/);
+    assert.match(r.out, /ready \[--epic KEY \| --all\]/);
+    assert.match(r.out, /"what's next\?"/);
+    assert.match(r.out, /Protocol Claude follows: \/pm/);
+  }
+  assert.equal(cli([], root).code, 1, 'no command is still a usage error');
+});

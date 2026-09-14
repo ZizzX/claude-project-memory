@@ -1,118 +1,311 @@
-# project-memory
+<p align="center">
+  <img src="assets/logo.svg" width="120" alt="project-memory logo: several worktrees merging into one board">
+</p>
 
-A Claude Code plugin that gives every git repository a memory Claude actually uses:
-an accepted **plan**, a **task board** with statuses, order and dependencies, a **decision log**
-(what, why, what was rejected) and a **session handoff** — so a new session, in any worktree,
-starts knowing where work stopped and what the next step is.
+<h1 align="center">project-memory</h1>
 
-- **Automatic.** Hooks inject a short board summary at every session start, nudge Claude when a
-  plan file changes, remind it when code changed but the board did not, and write a safety note
-  before context compaction or session end.
-- **Autonomous.** Claude creates tasks, moves statuses, logs work and records decisions itself,
-  ending each turn that changed the board with a one-line diff.
-- **Worktree-friendly.** The board lives outside your branches, one per repo, shared by all
-  worktrees on the machine.
-- **Local by default.** Nothing leaves your machine unless you enable sync for a project.
-- **Zero dependencies.** Node ≥ 20 and git. Windows, macOS, Linux.
+<p align="center">
+  A plan, a task board, a decision log and a session handoff for every git repository —<br>
+  kept by Claude Code itself, shared by all your worktrees, local by default.
+</p>
+
+<p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
+
+---
+
+## Why
+
+Claude Code forgets between sessions. On anything longer than one sitting that costs you:
+
+- every new session starts with "where did we stop?" and a re-read of the repository;
+- the reasons behind earlier choices are gone, so settled questions get argued again;
+- two worktrees of the same repo know nothing about each other and can pick up the same work;
+- a plan written by another tool (superpowers, gstack, plan mode) drifts away from what is actually done.
+
+project-memory keeps one small board per repository and puts a 40-line summary of it into the start of
+every session. Claude keeps the board current on its own: it creates tasks, moves statuses, logs what it
+did and what comes next, and records decisions with what was rejected.
 
 ## Install
+
+Requires Node ≥ 20 and git. Works on macOS, Linux and Windows. No dependencies.
 
 ```
 /plugin marketplace add ZizzX/claude-project-memory
 /plugin install project-memory@project-memory
 ```
 
-## Update
+Restart Claude Code (a new process, not `/clear`) so the hooks load.
+
+**Update:**
 
 ```
 /plugin marketplace update project-memory
 /plugin update project-memory@project-memory
 ```
 
-Then fully restart Claude Code (a new process, not `/clear`) so the new hooks are loaded.
+Then restart Claude Code again.
 
-## Use
+## Quick start
 
-Just work. In a repo with a board, every session starts with a summary like:
+1. Open a repository and start real work: "let's build the CSV import". For non-trivial, multi-step work
+   Claude creates the board (`pm init`), fills `PLAN.md` and imports existing plans. You can also say
+   "create a board".
+2. Ask **"break it down"**. Claude creates tasks with order and dependencies, and links a detailed plan.
+3. Ask **"what's next?"**. Claude claims the first ready task and writes down how it understands it.
+4. Work as usual. When you stop, say **"we're done"**: Claude logs what was done and the exact next step.
+5. `/clear` or come back tomorrow in any worktree. The session opens with the summary and carries on.
+
+Open `board.html` (the link is in the summary) for a kanban view that refreshes every 10 seconds.
+
+## Four ways it is used
+
+| Way | What it is | Who uses it |
+|---|---|---|
+| **Hooks** | Run automatically: summary at session start, reminders, safety notes | nobody — they just run |
+| **Phrases** | Plain language in the chat, like "what's next?" | you |
+| **`/pm`** (also `/project-memory:pm`) | The skill: the protocol Claude follows for every situation | Claude; you, to read the rules |
+| **`pm` CLI** | The commands that change the board | Claude; you, when you want to |
+
+To see every command and phrase at once:
+
+```
+node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
+```
+
+Handy alias: `alias pm='node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs'`.
+Run it from inside the project. The session summary also prints the exact CLI path it uses.
+
+## What to say
+
+| You say | Claude does |
+|---|---|
+| "what's next?", "take the next one" | `pm ready`, claims the first task of this worktree's direction, writes `## Understanding` first |
+| "break it down" | Creates tasks with `--order`, `--deps`, `--epic`; puts detail in a plan file and links it |
+| "remember …" | Puts it in exactly one place: a decision, auto-memory, or the task's `## Understanding` |
+| "waiting for …" | `status=waiting` with the reason; the task leaves Ready |
+| "we're done", "continue in a new session" | Logs `did` / `next` on every active task of this worktree, updates focus |
+| "the plan changes" | Edits `PLAN.md`, adds a Changelog line, records a decision |
+| "undo T-007", "undo that" | Reverts that board change with git |
+| "enable board sync", "connect the board" | Shows where the board would be pushed and waits for your yes |
+
+Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили»,
+«продолжим в новой сессии», «план меняется», «ждём», «откати», «включи синхронизацию доски», «подключи доску».
+
+Every turn that changed the board ends with one line such as
+`board: T-003 → done · new T-007 "data migration" (after T-005) · D-004`.
+
+## The session summary
 
 ```
 [pm] my-app · epic APP-12 · focus: import pipeline, parser done · board: file:///…/pm/board.html
 Your worktree (feature-csv):
   T-003 CSV import [in_progress] → next: handle empty rows (2026-09-12, feature-csv)
+Elsewhere: T-008 Export to XLSX @ feature-export
 Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
 Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
+CLI: node "…/scripts/pm.mjs" <command>
+Rules: …
 ```
 
-Useful phrases: "what's next?", "break it down", "remember …", "we're done",
-"continue in a new session", "the plan changes", "undo T-007". Run `/pm` to see the protocol.
-Open `board.html` in a browser for a kanban view that refreshes itself.
+| Line | Meaning |
+|---|---|
+| header | project, this worktree's epic, its focus line from `PLAN.md`, link to the board |
+| Your worktree | open tasks claimed here, with the last logged next step |
+| Elsewhere | tasks in progress in other worktrees — do not take them |
+| Ready | `todo` tasks whose dependencies are all done, for this worktree's epic |
+| Waiting | tasks blocked on something outside the board, and what |
+| Epics | open / total per direction |
+| Decisions | the three most recent |
 
-A board is created the first time you start non-trivial work in a repo (or say "create a board").
+The summary never exceeds 40 lines. Detail stays in the files and is read only when needed.
 
-### Several directions in one repository
+## Several directions in one repository: epics
 
-The board is one per repository, so unrelated work in different worktrees shares it. Give each
-direction an **epic**: `pm task new --title … --epic ATS-1224` (a Jira epic or ticket key, or a short
-slug). A worktree's epic is whatever its claimed tasks carry — never the branch name — and the summary,
-`pm ready` and the focus line are narrowed to it. A task without an epic is repo-wide and shows
-everywhere. In `PLAN.md`, `## Current focus` holds one line per epic: `- ATS-1224: what is happening
-now`. When every task of an epic is done the board folds them into one `Archive` line by itself.
-`pm epics` lists the directions. Boards without epics behave exactly as before.
+The board is one per repository, so unrelated work in different worktrees shares it. Give each direction
+an **epic** — a free key on its tasks, usually the Jira/Linear epic or ticket key, or a short slug:
+
+```
+pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
+```
+
+- **A worktree's epic is what its claimed tasks carry**, never the branch or directory name. The summary,
+  `pm ready` and the focus line are narrowed to it.
+- **A task without an epic is repo-wide** and shows in every direction. `--epic ""` creates one on purpose.
+- **A fresh worktree** that has claimed nothing sees one ready task per epic, tagged `(APP-12)`, and no
+  foreign focus line. It starts its own direction with `pm task new --epic <KEY>`.
+- **Dependencies may cross epics.** A task is ready when its dependencies are done, wherever they live.
+- **`PLAN.md` focus is one line per epic:** `- APP-12: parser done, validation next`.
+- **Closing is automatic.** When every task of an epic is done, the board folds its cards into one
+  `Archive` line. There is nothing to archive by hand.
+- `pm epics` lists every direction with open/total and its focus line.
+
+Boards without epics behave exactly as they did before epics existed.
+
+**Mapping a tracker epic.** Use the tracker's epic key as the board epic. One board task is one branch or
+merge request: split a big ticket into several tasks, fold several small tickets into one. Put ticket keys
+in titles and tracker links in `--links`. The tracker stays the team's view; the board is Claude's working
+memory for that work.
+
+## When to use it — and when not
+
+Put work on the board when **any** of these is true:
+
+- it will outlive the current session (`/clear`, tomorrow, next week);
+- it will continue in another worktree or on another machine;
+- it waits on something outside the code: a review, an answer, another team.
+
+Typical shapes:
+
+| Work | On the board |
+|---|---|
+| A feature over several merge requests | one epic, 5–15 tasks, a linked plan |
+| One ticket, one merge request | one task, epic = ticket key or none |
+| A refactoring in several passes | an epic slug like `refactor-forms` |
+| A one-session fix, a review, a question | nothing; answer the Stop reminder "nothing to track" |
+
+If a small fix spills into a second session, file the task then. It is cheaper than filing ahead.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `pm init` | Create the board for this repository |
+| `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b]` | Create a task. Without `--epic` it inherits this worktree's epic |
+| `pm set T-003 key=value …` | Change fields: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title` |
+| `pm claim T-003` | Attach this worktree to the task and set `in_progress` |
+| `pm log T-003 --did "…" --next "…"` | Append a work log entry |
+| `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
+| `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all |
+| `pm epics` | Every epic: open/total and its focus line |
+| `pm validate` | Check ids, statuses, `waiting` without a reason, unknown or dropped dependencies, cycles |
+| `pm board` | Redraw `BOARD.md` and `board.html`, print the path |
+| `pm summary` | Print the session summary for this worktree |
+| `pm scan` | List plan files of other tools with their checkbox progress |
+| `pm sync on [--remote url] [--yes]` · `pm sync off` · `pm sync` | Opt-in sync across machines |
+| `pm help` | All of the above, plus the phrases |
+
+Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `done`, `dropped`.
+"Blocked by another task" is a dependency, not a status.
+
+## Hooks
+
+| Event | What happens |
+|---|---|
+| **SessionStart** (startup, resume, clear, compact) | With sync on: commit, pull, check the memory link. Redraw the board, validate it, print the summary |
+| **PostToolUse** (Write, Edit, MultiEdit, ExitPlanMode) | A file inside the board changed → redraw the views. A plan file was written → ask Claude to reconcile the board with it |
+| **Stop** | Commit the board. If code changed but neither this worktree's tasks nor `PLAN.md` / `decisions.md` were touched for 20 minutes → ask Claude to log progress (at most once per 20 minutes) |
+| **PreCompact**, **SessionEnd** | Append an automatic note (changed files, last commit) to this worktree's in-progress tasks and commit |
+
+Plan files that trigger the reconcile nudge: `docs/superpowers/plans/`, `docs/superpowers/specs/`,
+`docs/designs/`, `.claude/plans/`, `~/.gstack/projects/*/ceo-plans/`, `.dev-cycle/tasks/`.
+
+Hooks never break a session: any error is swallowed, and the hook exits cleanly.
 
 ## Where things live
 
 ```
-~/.claude/projects/<repo-key>/pm/     (or $CLAUDE_CONFIG_DIR/projects/…)
-  PLAN.md  tasks/T-NNN.md  decisions.md  BOARD.md  board.html
+~/.claude/projects/<repo-key>/pm/          ($CLAUDE_CONFIG_DIR/projects/… if set)
+├── PLAN.md          goal, milestones, current focus (one line per epic), changelog
+├── tasks/T-NNN.md   frontmatter + Goal, Understanding, Checklist, Log
+├── decisions.md     append-only D-NNN entries: what, why, what was rejected
+├── memory/          Claude Code auto-memory, only when sync is on
+├── BOARD.md         generated view, never edit
+└── board.html       generated kanban, refreshes itself
 ```
 
-It is a small git repository: every board change is a commit, so any change can be reverted.
+- **One board per repository.** The key comes from the git common directory, so every worktree of the
+  repo shares it; branches do not.
+- **It is a git repository** (branch `pm`). Every change is a commit, so any change can be reverted:
+  `git -C <pm dir> log --oneline`, then `git -C <pm dir> revert <sha>`.
+- **Layers of memory, each in one place:** auto-memory holds durable facts about the project;
+  `decisions.md` holds why things are the way they are; a task file holds what and how for that work;
+  `PLAN.md` holds where things stand. A direction's detailed plan is its own file, linked with `--links`.
+
+A task file:
+
+```markdown
+---
+id: T-003
+title: CSV import
+status: in_progress
+order: 30
+depends_on: [T-001]
+waiting_on: ""
+worktrees: [feature-csv]
+milestone: M1
+links: [docs/plans/csv-import.md]
+updated: 2026-09-12
+epic: APP-12
+---
+## Goal
+## Understanding
+## Checklist
+## Log
+- 2026-09-12 · feature-csv · did: tokenizer and header mapping · next: handle empty rows
+```
 
 ## Sync across machines (opt-in)
 
-Say "enable board sync" (or run `pm sync on`). Claude shows where the board will be pushed and waits
-for your yes. The board is pushed to branch `pm` of the project's own remote, and Claude Code's
-auto-memory for the project moves into the board and syncs with it.
+Nothing leaves your machine until you enable sync for a project.
 
-On another machine, install the plugin and open the project: the summary says the repo has a shared
-board; say "connect the board". Nothing is ever connected automatically.
+1. Say **"enable board sync"** (or run `pm sync on`). Claude shows the remote and branch and waits for yes.
+2. The board is pushed to branch `pm` of the project's own remote. Claude Code's auto-memory for the
+   project moves into the board and syncs with it.
+3. Afterwards every board change is pushed in the background; each session start pulls first.
+   If commits stay unpushed for over a day, the summary says so.
+4. On another machine: install the plugin, open the project, say **"connect the board"**.
 
-### Privacy
+**Privacy.**
 
-- Nothing is pushed until you enable sync for that project.
-- With sync on, the board **and the project's auto-memory** are pushed to branch `pm` of the project's
-  remote. If that repository is public, they become public — use `pm sync on --remote <private-url>`.
-- Keep memory local while syncing the board: `git config pm.syncMemory false` before enabling sync.
-  This flag is only read when sync turns on — setting it afterwards does not unlink memory that is
-  already synced; undo that by hand (move `pm/memory` back and remove the link).
-- `pm sync off` stops syncing and keeps the local board.
+- If the project's repository is public, the board and memory become public. Use
+  `pm sync on --remote <private-url>`.
+- To sync the board but keep memory local: `git config pm.syncMemory false` **before** enabling sync.
+- `pm sync off` stops syncing and keeps the local board. The remote branch stays until you delete it.
 
-## Coexisting with other memory tools
+**Conflicts.** The summary shows `[pm] sync conflict in …`. Claude follows the protocol: runs `pm sync`,
+merges the listed markdown files keeping both sides, and syncs again. Nothing is discarded.
 
-If you use other resume/memory mechanisms (session checkpoints, context-save skills, memory MCP
-servers), consider disabling them once `/pm` works for you, so there is a single answer to
-"where did we stop?". Plans written by superpowers, gstack, plan mode or dev-cycle are picked up
-by the board automatically.
+## Working with other tools
+
+- **Plan writers** (superpowers, gstack, plan mode, dev-cycle): write the detailed plan with them. When the
+  file is saved, Claude adds coarse tasks to the board with a link to it and never copies its content.
+  Items removed from the plan become `dropped`.
+- **Other memory or resume tools** (checkpoints, context-save skills, memory MCP servers): consider turning
+  them off once the board works for you, so "where did we stop?" has one answer.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| No summary at session start | The repo has no board yet. Start multi-step work or say "create a board" |
+| `[pm] this repo has a shared board …` | Sync is on elsewhere. Say "connect the board" |
+| Changes to the plugin do not show up | Fully restart Claude Code. Check `~/.claude/plugins/installed_plugins.json` for the version |
+| Summary shows `focus: —` | This worktree has no epic yet, or `PLAN.md` has no line for it |
+| Stop keeps asking to update the board | Log progress, claim a task, or answer "nothing to track" |
+| `[pm] board problems: …` | Run `pm validate` and fix the listed tasks |
+| A wrong board change | Say "undo that", or revert it with git in the board directory |
 
 ## Development
 
 ```
-node --test                          # run all tests
-claude --plugin-dir .                # try the plugin without installing
+node --test              # run all tests
+claude --plugin-dir .    # try the plugin from this checkout without installing
 ```
 
-To get a change into a plugin installed from a local checkout (`/plugin marketplace add <path>`):
+Releasing a change to an installed plugin:
 
-1. Bump `version` in `.claude-plugin/plugin.json` and commit. `plugin update` compares only the
-   version, not the commit: with an unchanged version it reports "already at the latest version"
-   and copies nothing.
-2. Put the commit on the branch that checkout has checked out, e.g. `git merge --ff-only <branch>`.
-3. Run the two commands from [Update](#update) (from a shell: `claude plugin marketplace update
-   project-memory` and `claude plugin update project-memory@project-memory`), then restart.
-4. Check `~/.claude/plugins/installed_plugins.json`: the entry shows the installed `version` and
-   `gitCommitSha`.
+1. Finish the change and run the tests.
+2. **Bump `version` in `.claude-plugin/plugin.json` as the very last edit**, then commit and push.
+   `plugin update` compares only the version. A background marketplace refresh can copy the working tree
+   the moment the version changes, so a version bumped mid-work installs half-finished code.
+3. Run the two update commands, then restart Claude Code.
+4. Verify: the version in `~/.claude/plugins/installed_plugins.json`, and
+   `diff -rq ~/.claude/plugins/cache/project-memory/project-memory/<version> .` shows only `.git`.
+
+Design notes live in [`docs/superpowers/`](docs/superpowers/).
 
 ## License
 
