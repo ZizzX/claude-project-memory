@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tryGit, pmDir, worktreeName, today } from './paths.mjs';
-import { hasBoard, commitPm, isSyncOn, persist, readState, writeState } from './store.mjs';
+import { hasBoard, commitPm, isSyncOn, persist, readState, writeState, manualMtime } from './store.mjs';
+import { captureCommits } from './gitlink.mjs';
 import { listTasks, appendLogLine, validate } from './tasks.mjs';
 import { writeBoard } from './board.mjs';
 import { buildSummary } from './summary.mjs';
@@ -51,7 +52,7 @@ function lastBoardUpdate(pm, worktree, tasks) {
     path.join(pm, 'decisions.md'),
     ...tasks.filter((t) => t.data.worktrees.includes(worktree)).map((t) => t.file),
   ];
-  return Math.max(0, ...files.filter((f) => fs.existsSync(f)).map((f) => fs.statSync(f).mtimeMs));
+  return Math.max(0, ...files.filter((f) => fs.existsSync(f)).map((f) => manualMtime(pm, f)));
 }
 
 function codeChangedSince(cwd, since) {
@@ -105,6 +106,7 @@ export function onStop(input, cwd, now = Date.now()) {
   const pm = pmDir(cwd);
   if (!pm || !hasBoard(cwd)) return '';
   const tasks = listTasks(pm);
+  captureCommits(pm, cwd, tasks); // before the commit below, so linked commits land in "pm: stop"
   // The commit stays before the re-entrancy check: after a block the agent may have edited PLAN.md
   // by hand, and this repeated Stop is the only place that commits it.
   persist(pm, 'pm: stop', tasks);
@@ -125,6 +127,7 @@ export function onStop(input, cwd, now = Date.now()) {
 export function onSafetyNote(input, cwd, event) {
   const pm = pmDir(cwd);
   if (!pm || !hasBoard(cwd)) return '';
+  captureCommits(pm, cwd);
   if (!input.session_id) {
     // Without a stable key the "changed since" window belongs to some other run: note nothing.
     persist(pm, `pm: auto ${event}`);

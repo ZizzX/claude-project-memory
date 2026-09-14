@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
 import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic } from './lib/tasks.mjs';
+import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { currentFocus } from './lib/plan.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
@@ -94,7 +95,10 @@ const commands = {
       return [p.slice(0, i), p.slice(i + 1)];
     }));
     const pm = requireBoard(cwd);
+    const statusChange = 'status' in fields;
+    if (statusChange) captureCommits(pm, cwd); // the last commits land while the task is still in progress
     setFields(pm, id, fields, today());
+    if (statusChange) startCapture(pm, cwd); // commits made in another status are never linked later
     persist(pm, `pm: set ${id} ${pairs.join(' ')}`);
     return `${id} updated`;
   },
@@ -103,7 +107,9 @@ const commands = {
     if (!id) fail('usage: pm claim <id>');
     const pm = requireBoard(cwd);
     const wt = worktreeName(cwd);
-    claim(pm, id, wt, today());
+    captureCommits(pm, cwd); // commits so far belong to the tasks already in progress here
+    claim(pm, id, wt, today(), currentBranch(cwd));
+    startCapture(pm, cwd);
     persist(pm, `pm: claim ${id}`);
     return `${id} claimed by ${wt}`;
   },
