@@ -92,7 +92,7 @@ Run it from inside the project. The session summary also prints the exact CLI pa
 Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили»,
 «продолжим в новой сессии», «план меняется», «ждём», «откати», «включи синхронизацию доски», «подключи доску».
 
-Every turn that changed the board ends with one line such as
+Every turn that changed the board ends with one line in your language, such as
 `board: T-003 → done · new T-007 "data migration" (after T-005) · D-004`.
 
 ## The session summary
@@ -134,12 +134,14 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 - **A worktree's epic is what its claimed tasks carry**, never the branch or directory name. The summary,
   `pm ready` and the focus line are narrowed to it.
 - **A task without an epic is repo-wide** and shows in every direction. `--epic ""` creates one on purpose.
-- **A fresh worktree** that has claimed nothing sees one ready task per epic, tagged `(APP-12)`, and no
-  foreign focus line. It starts its own direction with `pm task new --epic <KEY>`.
+- **A fresh worktree** that has claimed nothing gets a summary with one ready task per epic, tagged
+  `(APP-12)`, and no foreign focus line. `pm ready` there lists every ready task with its tag. The worktree
+  starts its own direction with `pm task new --epic <KEY>`.
 - **Dependencies may cross epics.** A task is ready when its dependencies are done, wherever they live.
 - **`PLAN.md` focus is one line per epic:** `- APP-12: parser done, validation next`.
-- **Closing is automatic.** When every task of an epic is done, the board folds its cards into one
-  `Archive` line. There is nothing to archive by hand.
+- **Closing is automatic.** When no task of an epic is open any more, its cards leave the columns and
+  fold into one `Archive` line with the number of done tasks. An epic whose tasks were all dropped just
+  disappears. There is nothing to archive by hand.
 - `pm epics` lists every direction with open/total and its focus line.
 
 Boards without epics behave exactly as they did before epics existed.
@@ -178,14 +180,14 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 | `pm claim T-003` | Attach this worktree to the task and set `in_progress` |
 | `pm log T-003 --did "…" --next "…"` | Append a work log entry |
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
-| `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all |
+| `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |
 | `pm epics` | Every epic: open/total and its focus line |
 | `pm validate` | Check ids, statuses, `waiting` without a reason, unknown or dropped dependencies, cycles |
 | `pm board` | Redraw `BOARD.md` and `board.html`, print the path |
 | `pm summary` | Print the session summary for this worktree |
-| `pm scan` | List plan files of other tools with their checkbox progress |
+| `pm scan` | List plan files in `docs/superpowers/plans`, `docs/superpowers/specs`, `docs/designs`, `.dev-cycle/tasks` and gstack ceo-plans, with checkbox progress |
 | `pm sync on [--remote url] [--yes]` · `pm sync off` · `pm sync` | Opt-in sync across machines |
-| `pm help` | All of the above, plus the phrases |
+| `pm help` | All of the above, plus the phrases. `--help` after any command shows the same |
 
 Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `done`, `dropped`.
 "Blocked by another task" is a dependency, not a status.

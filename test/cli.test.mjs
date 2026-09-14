@@ -77,4 +77,10 @@ test('cli: help lists the commands and the phrases to say, and exits 0', () => {
     assert.match(r.out, /Protocol Claude follows: \/pm/);
   }
   assert.equal(cli([], root).code, 1, 'no command is still a usage error');
+  for (const args of [['init', '--help'], ['ready', '-h'], ['task', 'new', '--help']]) {
+    const r = cli(args, root);
+    assert.equal(r.code, 0, args.join(' '));
+    assert.match(r.out, /^usage: pm <command>\n/, args.join(' '));
+  }
+  assert.equal(fs.existsSync(pmDir(root)), false, '`pm init --help` must not create a board');
 });

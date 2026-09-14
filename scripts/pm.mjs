@@ -254,7 +254,10 @@ Re-run with --yes to proceed.`;
 
 async function main() {
   const [arg, ...args] = process.argv.slice(2);
-  const cmd = ['-h', '--help'].includes(arg) ? 'help' : arg;
+  // --help anywhere shows help instead of running the command (`pm init --help` must not create a board).
+  // `hook` is exempt: it is called by Claude Code, never by a person.
+  const asksHelp = [arg, ...args].some((a) => a === '-h' || a === '--help');
+  const cmd = asksHelp && arg !== 'hook' ? 'help' : arg;
   const run = Object.hasOwn(commands, cmd) ? commands[cmd] : null;
   if (!run) fail(USAGE);
   const out = await run(process.cwd(), args);
