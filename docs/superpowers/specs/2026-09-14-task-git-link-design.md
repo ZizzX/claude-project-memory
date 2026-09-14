@@ -58,15 +58,20 @@ Three optional task frontmatter fields:
   today, even after unrelated writes (`readTaskFile` must not add defaults for them).
 - URLs contain `:` and are already quoted by `frontmatter.mjs` `formatValue`.
 
-Local, not synced: the capture cursor `.state/capture-<worktree>.json` = `{ "since": <unix seconds> }`.
+Local, not synced: the capture cursor `.state/capture-<worktree>.json` = `{ "offset": <bytes> }` and the
+automatic-write record `.state/auto-mtime.json` (section 2, Rules).
 
 ## 2. Commit capture
 
-One function, `captureCommits(pm, cwd, now)` in a new `scripts/lib/gitlink.mjs`.
+One function, `captureCommits(pm, cwd, tasks?)` in a new `scripts/lib/gitlink.mjs`.
 
-**Source.** `git log -g --date=unix --format=%H|%gd|%gs HEAD` in the worktree (a linked worktree has its own
-HEAD reflog). `%gd` renders as `HEAD@{<unix>}`; `%gs` is the reflog subject. Entries with time `>= since` are
-processed oldest first.
+**Source.** The worktree's HEAD reflog file, `git rev-parse --path-format=absolute --git-path logs/HEAD`
+(a linked worktree has its own). Lines are append-only, documented by `git update-ref`:
+`<old> <new> <name> <email> <time> <tz>\t<subject>`. The cursor is a byte offset: a capture reads the complete
+lines after it, oldest first, and moves it to the end of the last complete line. A time-based cursor was
+rejected after a probe: commits, cherry-picks and reverts made in one second share a timestamp and even a SHA.
+The old SHA on each line gives the amended commit directly. A file shorter than the cursor (reflog expired)
+restarts the cursor at its size without reading.
 
 **Selection by reflog subject prefix:**
 
@@ -74,8 +79,7 @@ processed oldest first.
 |---|---|
 | `commit:`, `commit (initial):`, `commit (amend):`, `cherry-pick:`, `revert:` | `commit (merge):`, `merge `, `pull`, `reset:`, `checkout:`, `rebase`, `Branch:`, anything else |
 
-- `commit (amend)`: the previous HEAD value (the next older reflog entry) is removed from `commits` if present,
-  the new SHA is appended.
+- `commit (amend)`: the line's old SHA is removed from `commits` if present, the new SHA is appended.
 - A SHA already in `commits` is not added again (same-second entries, repeated Stop).
 
 **Attribution.** Let `open` = tasks with `status: in_progress` whose `worktrees` contain this worktree.
@@ -86,24 +90,28 @@ processed oldest first.
 | 0 | nothing written |
 | ≥ 2 | each open task gets a Log line `- <date> · <worktree> · auto: commits not attributed (N tasks in progress): <sha…> — pm set T-NNN commits=…` |
 
-In every case the cursor moves to `now`.
+With 1 or ≥ 2 open tasks the cursor moves past the lines read. With 0 open tasks the capture returns without
+touching git; every status change resets the cursor (below), so commits made while nothing was in progress are
+never linked later.
 
 **Call sites:**
 
 | Where | When |
 |---|---|
-| `pm claim T-NNN` | first capture for the tasks already open (flush), then write `branch`, then set cursor to now |
+| `pm claim T-NNN` | capture for the tasks already open (flush), write `branch`, reset the cursor to the end of the reflog |
+| `pm set T-NNN status=…` (any status change) | capture before the change, while the task is still in progress; reset the cursor after it |
 | `onStop` | every agent turn, before `persist()` so the capture is committed with `pm: stop` |
 | `onSafetyNote` | PreCompact / SessionEnd, next to the existing auto log |
-| `pm set T-NNN status=done` | before the status changes, while the task is still in progress |
 
 **Rules:**
 - No cursor file (a task claimed before this version): the first capture only creates the cursor, no backfill.
 - Commits made before `pm claim` are never captured.
 - The capture must not count as a board update for the Stop nudge ("Code changed but the board was not
-  updated"): `lastBoardUpdate` reads task-file mtimes, so the capture restores the file's previous mtime
-  after writing (`fs.utimesSync`). Mark it with a `ponytail:` comment — the ceiling is that the nudge
-  heuristic stays mtime-based; move it to board-commit history if more automatic writes appear.
+  updated"), which compares task-file mtimes. Restoring the old mtime was rejected: an amend swaps one 12-char
+  SHA for another, the file size stays the same, and git (on Windows ctime is the creation time) would treat
+  the file as unchanged and never commit it. Instead every automatic write records
+  `{ before, after }` mtimes per file in `.state/auto-mtime.json`; `lastBoardUpdate` uses `before` while the
+  file's mtime still equals `after`, so any later manual or CLI write counts again.
 - Hooks never break a session: capture runs inside the existing hook try/catch; a failing git call means
   "nothing captured".
 - Reflog disabled (`core.logAllRefUpdates=false`) or empty: nothing captured; `pm show` prints a hint when a
@@ -234,7 +242,8 @@ after creating an MR/PR, `pm set T-NNN pr=<url>`.
 
 - Tasks without the new fields read, write and render exactly as before; the existing byte-for-byte board
   rendering test stays green, and a new test asserts an old task file is unchanged after an unrelated `pm set`.
-- The Stop hook adds one `git log -g` call per turn, only when this worktree has a task in progress.
+- The Stop hook adds one `git rev-parse` call and a read of the reflog tail per turn, only when this worktree
+  has a task in progress.
 - `branch` / `commits` / `pr` sync with the board. Two machines appending to the same task's `commits` at once
   produce an ordinary markdown conflict, resolved through the existing `pm sync` path.
 - Release: version 0.3.0 bumped as the last step, then reinstall (D-009, README "Development").
@@ -272,4 +281,6 @@ after creating an MR/PR, `pm set T-NNN pr=<url>`.
 - A local rebase rewrites SHAs; they show as rewritten until a merged MR provides the merge/squash SHA.
 - GitHub "Rebase and merge": the merged commit list is not recoverable; case 2 applies while the original SHAs
   still exist, case 4 otherwise.
-- The Stop nudge stays mtime-based; the capture preserves mtime to stay invisible to it.
+- The Stop nudge stays mtime-based; automatic writes are recorded so it can see past them.
+- A reftable repository (`git init --ref-format=reftable`) has no `logs/HEAD` file: nothing is captured there.
+- A reflog that expired and grew again before the next capture loses the commits in between.
