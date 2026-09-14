@@ -6,7 +6,8 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate, parseOrder } from './lib/tasks.mjs';
+import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic } from './lib/tasks.mjs';
+import { currentFocus } from './lib/plan.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
 import { buildSummary } from './lib/summary.mjs';
@@ -17,12 +18,14 @@ import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
   init                                         create the local board for this repo
-  task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--links a,b]
-  set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, ...)
+  task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
+  set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, ...)
   claim <id>                                   attach this worktree and set in_progress
   log <id> --did "..." --next "..."            append a work log entry
   decision --title T --why W --rejected R [--tasks T-001,T-002]
-  ready | validate | board | summary | scan
+  ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
+  epics                                        every epic with open/total and its focus line
+  validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   hook <event>                                 hook entry point (used by the plugin)`;
 
@@ -51,19 +54,24 @@ const commands = {
 
   task(cwd, [sub, ...args]) {
     if (sub !== 'new') fail(USAGE);
-    const v = strings(args, ['title', 'order', 'deps', 'milestone', 'links']);
+    const v = strings(args, ['title', 'order', 'deps', 'milestone', 'epic', 'links']);
     if (!v.title) fail('--title is required');
     const pm = requireBoard(cwd);
+    const all = listTasks(pm);
+    // A task inherits the epic of its worktree; --epic "" makes it repo-wide on purpose.
+    const epic = (v.epic ?? activeEpic(all, worktreeName(cwd))).trim();
     const t = newTask(pm, {
       title: v.title,
       order: v.order === undefined ? undefined : parseOrder(v.order),
       deps: list(v.deps),
       milestone: v.milestone ?? '',
+      epic,
       links: list(v.links),
       date: today(),
     });
     persist(pm, `pm: task new ${t.id}`);
-    return `${t.id} created: ${t.file}`;
+    const note = epic ? ` (epic ${epic}${all.some((x) => x.data.epic === epic) ? '' : ', new epic'})` : '';
+    return `${t.id} created${note}: ${t.file}`;
   },
 
   set(cwd, [id, ...pairs]) {
@@ -106,8 +114,33 @@ const commands = {
     return `${id} recorded`;
   },
 
-  ready(cwd) {
-    return readyQueue(listTasks(requireBoard(cwd))).map((t) => `${t.id} ${t.data.title}`).join('\n') || '(nothing ready)';
+  ready(cwd, args) {
+    const v = parseArgs({ args, options: { epic: { type: 'string' }, all: { type: 'boolean' } } }).values;
+    if (v.all && v.epic !== undefined) fail('usage: pm ready [--epic KEY | --all]');
+    const all = listTasks(requireBoard(cwd));
+    const hasEpics = all.some((t) => t.data.epic);
+    const epic = v.all ? '' : (v.epic?.trim() ?? activeEpic(all, worktreeName(cwd)));
+    if (epic && v.epic !== undefined && !all.some((t) => t.data.epic === epic)) fail(`unknown epic "${epic}" — pm epics lists them`);
+    // Say when the list is narrowed, and when it could not be: a silent subset reads as "nothing else exists".
+    const head = epic
+      ? `# epic ${epic} · pm ready --all for every direction`
+      : hasEpics && !v.all ? '# no epic for this worktree yet — start yours with: pm task new --epic KEY' : '';
+    const body = byEpic(readyQueue(all), epic).map((t) => `${t.id} ${t.data.title}${!epic && t.data.epic ? ` (${t.data.epic})` : ''}`).join('\n') || '(nothing ready)';
+    return head ? `${head}\n${body}` : body;
+  },
+
+  epics(cwd) {
+    const pm = requireBoard(cwd);
+    const all = listTasks(pm);
+    const keys = [...new Set(all.map((t) => t.data.epic))].sort((a, b) => (a === '') - (b === '')); // first appearance, repo-wide last
+    if (!keys.some(Boolean)) return '(no epics)';
+    const known = new Set(keys.filter(Boolean));
+    return keys.map((e) => {
+      const ts = all.filter((t) => t.data.epic === e && t.data.status !== 'dropped');
+      const open = ts.filter(isOpen).length;
+      const focus = e ? currentFocus(pm, e, known) : '';
+      return `${e || '(none)'} · ${open}/${ts.length} open${e && !open && ts.length ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
+    }).join('\n');
   },
 
   validate(cwd) {

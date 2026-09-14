@@ -36,11 +36,12 @@ Then fully restart Claude Code (a new process, not `/clear`) so the new hooks ar
 Just work. In a repo with a board, every session starts with a summary like:
 
 ```
-[pm] my-app · focus: M1 import pipeline · board: file:///…/pm/board.html
+[pm] my-app · epic APP-12 · focus: import pipeline, parser done · board: file:///…/pm/board.html
 Your worktree (feature-csv):
   T-003 CSV import [in_progress] → next: handle empty rows (2026-09-12, feature-csv)
-Ready: T-004 validation · T-006 export
+Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
+Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
 ```
 
@@ -49,6 +50,16 @@ Useful phrases: "what's next?", "break it down", "remember …", "we're done",
 Open `board.html` in a browser for a kanban view that refreshes itself.
 
 A board is created the first time you start non-trivial work in a repo (or say "create a board").
+
+### Several directions in one repository
+
+The board is one per repository, so unrelated work in different worktrees shares it. Give each
+direction an **epic**: `pm task new --title … --epic ATS-1224` (a Jira epic or ticket key, or a short
+slug). A worktree's epic is whatever its claimed tasks carry — never the branch name — and the summary,
+`pm ready` and the focus line are narrowed to it. A task without an epic is repo-wide and shows
+everywhere. In `PLAN.md`, `## Current focus` holds one line per epic: `- ATS-1224: what is happening
+now`. When every task of an epic is done the board folds them into one `Archive` line by itself.
+`pm epics` lists the directions. Boards without epics behave exactly as before.
 
 ## Where things live
 

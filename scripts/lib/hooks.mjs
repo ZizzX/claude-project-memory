@@ -58,11 +58,11 @@ function committedSince(cwd, head) {
   return (tryGit(['diff', '--name-only', `${head}..HEAD`], cwd) ?? '').split('\n').filter(Boolean);
 }
 
-function lastBoardUpdate(pm, worktree) {
+function lastBoardUpdate(pm, worktree, tasks) {
   const files = [
     path.join(pm, 'PLAN.md'),
     path.join(pm, 'decisions.md'),
-    ...listTasks(pm).filter((t) => t.data.worktrees.includes(worktree)).map((t) => t.file),
+    ...tasks.filter((t) => t.data.worktrees.includes(worktree)).map((t) => t.file),
   ];
   return Math.max(0, ...files.filter((f) => fs.existsSync(f)).map((f) => fs.statSync(f).mtimeMs));
 }
@@ -90,13 +90,14 @@ export function onSessionStart(input, cwd) {
     const unpushed = unpushedOverDay(pm);
     if (!status && unpushed) status = `[pm] ${unpushed} board commits not pushed for over a day — run: pm sync`;
   }
-  writeBoard(pm);
-  const problems = validate(listTasks(pm));
+  const tasks = listTasks(pm); // after the pull: one scan serves the board, validation and the summary
+  writeBoard(pm, tasks);
+  const problems = validate(tasks);
   if (!status && problems.length) status = `[pm] board problems: ${problems.slice(0, 3).join('; ')} — run: pm validate`;
   // A missing session_id means no stdin reached us (a plugin reload, not a real session start).
   // Keying state as "undefined" pools unrelated runs into one window; the summary still prints.
   if (input.session_id) writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
-  return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine: status });
+  return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine: status, tasks });
 }
 
 export function onPostToolUse(input, cwd) {
@@ -116,10 +117,13 @@ export function onPostToolUse(input, cwd) {
 export function onStop(input, cwd, now = Date.now()) {
   const pm = pmDir(cwd);
   if (!pm || !hasBoard(cwd)) return '';
-  persist(pm, 'pm: stop');
+  const tasks = listTasks(pm);
+  // The commit stays before the re-entrancy check: after a block the agent may have edited PLAN.md
+  // by hand, and this repeated Stop is the only place that commits it.
+  persist(pm, 'pm: stop', tasks);
   if (input.stop_hook_active) return '';
   const worktree = worktreeName(cwd);
-  const updated = lastBoardUpdate(pm, worktree);
+  const updated = lastBoardUpdate(pm, worktree, tasks);
   const stateName = `stop-${worktree}`;
   const { lastBlock = 0 } = readState(pm, stateName);
   const windowMs = STALE_MINUTES * 60_000;

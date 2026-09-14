@@ -27,6 +27,7 @@ function readTaskFile(file) {
     links: toArray(raw.links),
     waiting_on: raw.waiting_on ?? '',
     milestone: raw.milestone ?? '',
+    epic: String(raw.epic ?? '').trim(),
   };
   return { file, id: path.basename(file, '.md'), data, body };
 }
@@ -52,7 +53,7 @@ export function writeTask(task) {
 }
 
 // The id is reserved by creating T-NNN.md exclusively, so concurrent processes never share an id.
-export function newTask(pm, { title, order, deps = [], milestone = '', links = [], date }) {
+export function newTask(pm, { title, order, deps = [], milestone = '', epic = '', links = [], date }) {
   const dir = tasksDir(pm);
   fs.mkdirSync(dir, { recursive: true });
   let n = Math.max(0, ...fs.readdirSync(dir).map((f) => Number(f.match(ID_RE)?.[1] ?? 0))) + 1;
@@ -78,6 +79,7 @@ export function newTask(pm, { title, order, deps = [], milestone = '', links = [
       milestone,
       links,
       updated: date,
+      epic,
     };
     fs.writeSync(fd, serialize(data, TEMPLATE_BODY));
     fs.closeSync(fd);
@@ -131,6 +133,20 @@ export function lastNext(task) {
   if (!last) return null;
   const [date, who] = last.replace(/^- /, '').split(' · ');
   return { date, who, next: last.slice(last.indexOf(' · next: ') + ' · next: '.length) };
+}
+
+export const isOpen = (t) => !['done', 'dropped'].includes(t.data.status);
+
+// An empty epic marks a repo-wide task: it stays visible in every epic's view.
+export const byEpic = (tasks, epic) => (epic ? tasks.filter((t) => !t.data.epic || t.data.epic === epic) : tasks);
+
+// The epic of a worktree is what it claimed — never its branch or directory name.
+export function activeEpic(tasks, worktree) {
+  const mine = tasks.filter((t) => t.data.worktrees.includes(worktree));
+  const epics = (ts) => new Set(ts.map((t) => t.data.epic).filter(Boolean));
+  const open = epics(mine.filter(isOpen));
+  const found = open.size ? open : epics(mine); // last task closed: the worktree still remembers its direction
+  return found.size === 1 ? [...found][0] : '';
 }
 
 export function readyQueue(tasks) {

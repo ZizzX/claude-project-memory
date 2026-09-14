@@ -159,3 +159,15 @@ test('hook stop never throws regardless of stdin shape', () => {
     assert.equal(r.err, '', `stdin ${JSON.stringify(stdin)} should print nothing to stderr`);
   }
 });
+
+test('stop: the repeated Stop after a block still commits a hand edit of the board', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  const pm = pmDir(root);
+  fs.appendFileSync(path.join(pm, 'PLAN.md'), '- ATS-1: edited by hand\n');
+  assert.equal(onPostToolUse({ tool_name: 'Edit', tool_input: { file_path: path.join(pm, 'PLAN.md') } }, root), '');
+  assert.match(sh(['status', '--porcelain'], pm), /PLAN\.md/, 'PostToolUse only redraws the board');
+  assert.equal(onStop({ stop_hook_active: true }, root), '');
+  assert.equal(sh(['status', '--porcelain'], pm), '', 'the re-entrant Stop is the only commit path for this edit');
+  assert.equal(sh(['log', '-1', '--format=%s'], pm), 'pm: stop');
+});

@@ -43,8 +43,8 @@ export function backgroundPush(pm) {
   spawn(process.execPath, [PM_SCRIPT, '_push', pm], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
 }
 
-export function persist(pm, message) {
-  writeBoard(pm);
+export function persist(pm, message, tasks) {
+  writeBoard(pm, tasks);
   if (commitPm(pm, message) && isSyncOn(pm)) backgroundPush(pm);
 }
 
