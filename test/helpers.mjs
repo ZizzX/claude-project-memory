@@ -14,6 +14,7 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: 'test',
   GIT_COMMITTER_EMAIL: 'test@example.com',
   PM_NO_BACKGROUND: '1',
+  PM_FORGE_FIXTURE: fileURLToPath(new URL('./no-forge-fixture.json', import.meta.url)), // missing on purpose: no network in tests
 });
 
 export function tmp(prefix = 'pm-') {

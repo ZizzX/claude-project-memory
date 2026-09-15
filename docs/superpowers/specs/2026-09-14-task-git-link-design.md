@@ -172,7 +172,7 @@ Host kind: `github.com` or a URL with `/pull/` → GitHub; a URL with `/-/merge_
 does not write it back.
 
 **Degradation:** exec timeout 10 s. CLI missing, not authenticated, offline, non-JSON or unknown URL shape →
-print the URL with `(no data: gh/glab unavailable)` and continue. Never exit non-zero because of the forge.
+print the URL with `(no data from gh)` / `(no data from glab)` — or `(unknown PR URL)` — and continue. Never exit non-zero because of the forge.
 
 **Test seam:** `PM_FORGE_FIXTURE=<file.json>` — a map from the API path to a response object; when set, no
 process is spawned (same pattern as `PM_NO_BACKGROUND`).

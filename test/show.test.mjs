@@ -44,12 +44,16 @@ test('pm show: header, branch, pr, timeline, commits, decisions and dependents; 
   cli(['set', 'T-001', 'status=done'], root); // flushes the commit into the task
   const pm = pmDir(root);
   const head = sh(['rev-parse', 'HEAD'], pm);
-  const r = cli(['show', 'T-001'], root);
+  const fixture = path.join(root, '..', `${path.basename(root)}-forge.json`);
+  fs.writeFileSync(fixture, JSON.stringify({
+    'repos/o/r/pulls/7': { html_url: 'https://github.com/o/r/pull/7', state: 'closed', merged_at: '2026-09-10T09:02:00Z', merge_commit_sha: 'a1b2c3d4e5f6a7b8c9d0', user: { login: 'aziz' } },
+  }));
+  const r = cli(['show', 'T-001'], root, { env: { PM_FORGE_FIXTURE: fixture } });
   assert.equal(r.code, 0, r.err);
   const lines = r.out.split('\n');
   assert.equal(lines[0], 'T-001 export · done · epic ATS-1');
   assert.equal(lines[1], 'branch: main');
-  assert.equal(lines[2], 'pr: https://github.com/o/r/pull/7');
+  assert.match(lines[2], new RegExp(`^pr: https://github\\.com/o/r/pull/7 · merged ${STAMP} · merge a1b2c3d4e5f6 · @aziz$`));
   assert.match(lines[3], new RegExp(`^timeline: created ${STAMP} test · claimed ${STAMP} test · done ${STAMP} test$`));
   assert.equal(lines[4], 'commits (1):');
   assert.match(lines[5], new RegExp(`^  ${sha} ${STAMP} test  feat: csv writer$`));
@@ -75,6 +79,26 @@ test('pm show: no linked commits yet is explained; a rewritten SHA is marked', (
   assert.match(cli(['show', 'T-001'], root).out, /\ncommits: none linked yet — commits made in this worktree after pm claim appear here$/);
   cli(['set', 'T-001', 'commits=deadbeefdead'], root);
   assert.match(cli(['show', 'T-001'], root).out, /\ncommits \(1\):\n {2}deadbeefdead \(rewritten — not in this repository\)$/);
+});
+
+test('pm show: an MR found by branch on a GitLab origin; a PR the forge has no data for says so', () => {
+  const { root } = setup();
+  sh(['remote', 'add', 'origin', 'git@gitlab.corp.io:ats/app.git'], root);
+  sh(['switch', '-q', '-c', 'feat/x'], root);
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a'], root);
+  cli(['task', 'new', '--title', 'b'], root);
+  cli(['claim', 'T-001'], root);
+  cli(['set', 'T-002', 'pr=https://github.com/o/r/pull/9'], root);
+  const fixture = path.join(root, '..', `${path.basename(root)}-forge.json`);
+  fs.writeFileSync(fixture, JSON.stringify({
+    'projects/ats%2Fapp/merge_requests?source_branch=feat%2Fx&state=all': [
+      { web_url: 'https://gitlab.corp.io/ats/app/-/merge_requests/3', state: 'opened', author: { username: 'aziz' } },
+    ],
+  }));
+  const env = { env: { PM_FORGE_FIXTURE: fixture } };
+  assert.match(cli(['show', 'T-001'], root, env).out, /\npr: https:\/\/gitlab\.corp\.io\/ats\/app\/-\/merge_requests\/3 \(found by branch\) · open · @aziz\n/);
+  assert.match(cli(['show', 'T-002'], root, env).out, /\npr: https:\/\/github\.com\/o\/r\/pull\/9 \(no data from gh\)\n/);
 });
 
 test('pm show: unknown id and missing id are errors', () => {

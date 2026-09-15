@@ -2,8 +2,19 @@ import { tryGit } from './paths.mjs';
 import { readTask, listTasks } from './tasks.mjs';
 import { decisionsFor } from './decisions.mjs';
 import { describeCommits } from './gitlink.mjs';
+import { prInfo } from './forge.mjs';
 
 const stamp = (unix) => new Date(unix * 1000).toLocaleString('sv-SE').slice(0, 16);
+
+function prLine(pr) {
+  if (pr.unavailable) return `pr: ${pr.url} (${pr.unavailable})`;
+  const parts = [`pr: ${pr.url}${pr.foundByBranch ? ' (found by branch)' : ''}`];
+  parts.push(pr.state === 'merged' && pr.mergedAt ? `merged ${stamp(pr.mergedAt)}` : pr.state);
+  if (pr.mergeSha) parts.push(`merge ${pr.mergeSha.slice(0, 12)}`);
+  else if (pr.squashSha) parts.push(`squash ${pr.squashSha.slice(0, 12)}`);
+  if (pr.author) parts.push(`@${pr.author}`);
+  return parts.join(' · ');
+}
 
 // Board history of one task from pm commit subjects ("<unix>\t<author>\t<subject>"), oldest first.
 // A run of the same label keeps its first event: re-claims and repeated statuses add nothing to read.
@@ -31,7 +42,8 @@ export function showTask(pm, cwd, id) {
   const { data } = readTask(pm, id);
   const lines = [`${id} ${data.title} · ${data.status}${data.epic ? ` · epic ${data.epic}` : ''}`];
   if (data.branch) lines.push(`branch: ${data.branch}`);
-  if (data.pr) lines.push(`pr: ${data.pr}`);
+  const pr = prInfo(data, cwd);
+  if (pr) lines.push(prLine(pr));
   const events = timelineEvents(boardHistory(pm, id), id);
   if (events.length) lines.push(`timeline: ${events.map((e) => `${e.label} ${stamp(e.at)} ${e.author}`).join(' · ')}`);
   const commits = describeCommits(cwd, data.commits ?? []);
