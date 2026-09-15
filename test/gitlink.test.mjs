@@ -6,7 +6,7 @@ import { setup, addWorktree, tmp, sh, cli } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
 import { readTask } from '../scripts/lib/tasks.mjs';
 import { onStop, onSafetyNote } from '../scripts/lib/hooks.mjs';
-import { reflogSince } from '../scripts/lib/gitlink.mjs';
+import { reflogSince, describeCommits } from '../scripts/lib/gitlink.mjs';
 
 const MIN = 60_000;
 
@@ -187,4 +187,16 @@ test('tasks without a branch or commits keep their file shape', () => {
   for (const id of ['T-001', 'T-002']) {
     assert.doesNotMatch(fs.readFileSync(path.join(pmDir(root), 'tasks', `${id}.md`), 'utf8'), /^(branch|commits|pr):/m);
   }
+});
+
+test('describeCommits keeps the stored order and marks SHAs git does not have', () => {
+  const { root } = setup();
+  const a = commit(root, 'a.txt');
+  const b = commit(root, 'b.txt', 'second commit');
+  const [first, gone, second] = describeCommits(root, [b, 'deadbeefdead', a]);
+  assert.ok(first.at > 1_700_000_000, 'unix seconds');
+  assert.deepEqual({ ...first, at: 0 }, { sha: b, at: 0, author: 'test', subject: 'second commit' });
+  assert.deepEqual(gone, { sha: 'deadbeefdead', missing: true });
+  assert.equal(second.subject, 'a.txt');
+  assert.deepEqual(describeCommits(root, []), []);
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { tmp } from './helpers.mjs';
-import { decisionsFile, appendDecision, recentDecisions } from '../scripts/lib/decisions.mjs';
+import { decisionsFile, appendDecision, recentDecisions, decisionsFor } from '../scripts/lib/decisions.mjs';
 import { planFile, planTemplate, projectName, currentFocus } from '../scripts/lib/plan.mjs';
 
 const D = '2026-09-12';
@@ -34,4 +34,15 @@ test('plan template exposes name and focus', () => {
   fs.writeFileSync(planFile(pm), planTemplate('demo', D).replace('## Current focus\n', '## Current focus\nM1 board core\n'));
   assert.equal(currentFocus(pm), 'M1 board core');
   assert.equal(projectName(tmp()), '');
+});
+
+test('decisionsFor matches whole task ids in the tasks line, oldest first', () => {
+  const pm = tmp();
+  const date = '2026-09-16';
+  appendDecision(pm, { title: 'one', why: 'w', rejected: 'r', tasks: ['T-001', 'T-002'], date });
+  appendDecision(pm, { title: 'none', why: 'w', rejected: 'r', date });
+  appendDecision(pm, { title: 'other', why: 'w', rejected: 'r', tasks: ['T-0011'], date });
+  appendDecision(pm, { title: 'two', why: 'w', rejected: 'r', tasks: ['T-001'], date });
+  assert.deepEqual(decisionsFor(pm, 'T-001').map((d) => `${d.id} ${d.title}`), ['D-001 one', 'D-004 two']);
+  assert.deepEqual(decisionsFor(tmp(), 'T-001'), []);
 });

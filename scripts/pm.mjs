@@ -8,6 +8,7 @@ import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
 import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
+import { showTask } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
@@ -23,6 +24,7 @@ const USAGE = `usage: pm <command>
   set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, ...)
   claim <id>                                   attach this worktree and set in_progress
   log <id> --did "..." --next "..."            append a work log entry
+  show <id>                                    task history: branch, pr, timeline, commits, decisions, dependents
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
@@ -121,6 +123,11 @@ const commands = {
     appendLog(pm, id, { worktree: worktreeName(cwd), did: v.did, next: v.next, date: today() });
     persist(pm, `pm: log ${id}`);
     return `${id} logged`;
+  },
+
+  show(cwd, [id]) {
+    if (!id) fail('usage: pm show <id>');
+    return showTask(requireBoard(cwd), cwd, id);
   },
 
   decision(cwd, args) {

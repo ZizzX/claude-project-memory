@@ -24,3 +24,18 @@ export function appendDecision(pm, { title, why, rejected, tasks = [], date }) {
 export function recentDecisions(pm, n = 3) {
   return entries(pm).slice(-n).reverse();
 }
+
+// Decisions whose "- tasks:" line names `id`, oldest first.
+export function decisionsFor(pm, id) {
+  const file = decisionsFile(pm);
+  if (!fs.existsSync(file)) return [];
+  const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+  const heads = [...text.matchAll(HEAD_RE)];
+  return heads
+    .filter((m, i) => {
+      const body = text.slice(m.index, heads[i + 1]?.index ?? text.length);
+      const tasks = body.match(/^- tasks: (.+)$/m)?.[1].split(',').map((s) => s.trim()) ?? [];
+      return tasks.includes(id);
+    })
+    .map((m) => ({ id: m[1], date: m[2].trim(), title: m[3].trim() }));
+}

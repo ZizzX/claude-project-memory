@@ -96,3 +96,21 @@ export function captureCommits(pm, cwd, tasks) {
     if (process.env.PM_DEBUG) console.error(e);
   }
 }
+
+// Author, time and subject of stored SHAs, in their order; a SHA git no longer has is { sha, missing: true }.
+export function describeCommits(cwd, shas) {
+  if (!shas.length) return [];
+  const check = tryGit(['cat-file', '--batch-check'], cwd, { input: `${shas.join('\n')}\n`, stdio: ['pipe', 'pipe', 'pipe'] });
+  const lines = (check ?? '').split('\n'); // one line per input, in input order
+  const oids = shas.map((_, i) => {
+    const [oid, type] = (lines[i] ?? '').split(' ');
+    return type === 'commit' ? oid : null;
+  });
+  const found = oids.filter(Boolean);
+  const log = found.length ? tryGit(['log', '--no-walk=unsorted', '--format=%H%x09%at%x09%an%x09%s', ...found], cwd) : '';
+  const info = new Map((log ?? '').split('\n').filter(Boolean).map((line) => {
+    const [oid, at, author, ...subject] = line.split('\t');
+    return [oid, { at: Number(at), author, subject: subject.join('\t') }];
+  }));
+  return shas.map((sha, i) => (info.has(oids[i]) ? { sha, ...info.get(oids[i]) } : { sha, missing: true }));
+}
