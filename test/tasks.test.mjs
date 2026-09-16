@@ -48,6 +48,11 @@ test('the prefix must be an uppercase key', () => {
   for (const bad of ['pm', 'P-M', '1PM', '', 'ABCDEFGHIJK']) assert.throws(() => setTaskPrefix(pm, bad), /prefix/);
   setTaskPrefix(pm, 'ATS2');
   assert.equal(taskPrefix(pm), 'ATS2');
+  // config.json arrives with board sync, so a hand-edited prefix is checked on read too: it becomes a file name.
+  fs.writeFileSync(path.join(pm, 'config.json'), JSON.stringify({ taskPrefix: '../../evil' }));
+  assert.throws(() => taskPrefix(pm), /prefix/);
+  assert.throws(() => newTask(pm, { title: 'x', date: D }), /prefix/);
+  assert.ok(!fs.existsSync(path.join(pm, '..', 'evil-001.md')));
 });
 
 test('setFields validates and normalizes', () => {
@@ -58,6 +63,11 @@ test('setFields validates and normalizes', () => {
   assert.throws(() => setFields(pm, 'T-001', { order: 'abc' }, D), /order/);
   assert.throws(() => setFields(pm, 'T-001', { id: 'T-002' }, D), /id cannot/);
   assert.throws(() => readTask(pm, 'T-404'), /unknown task T-404/);
+  // An id outside the <PREFIX>-NNN form must never become a path: ../x would leave tasks/.
+  fs.writeFileSync(path.join(pm, 'outside.md'), '---\nid: x\ntitle: x\nstatus: todo\norder: 1\n---\n');
+  for (const bad of ['../outside', 'tasks/../../outside', 't-001', 'T-001.md', ''])
+    assert.throws(() => readTask(pm, bad), /bad task id/);
+  assert.throws(() => setFields(pm, '../outside', { status: 'done' }, D), /bad task id/);
   const t = setFields(pm, 'T-001', { status: 'waiting', waiting_on: 'answer about dates', depends_on: 'T-009, T-010', order: '7' }, '2026-09-13');
   assert.deepEqual(t.data.depends_on, ['T-009', 'T-010']);
   assert.equal(t.data.order, 7);

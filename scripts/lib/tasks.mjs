@@ -21,10 +21,16 @@ function readConfig(pm) {
   }
 }
 
-export const taskPrefix = (pm) => readConfig(pm).taskPrefix || 'T';
+function checkPrefix(prefix) {
+  if (!PREFIX_RE.test(prefix)) throw new Error(`bad prefix "${prefix}" — uppercase letters and digits, starting with a letter, up to 10`);
+  return prefix;
+}
+
+// Checked on read as well: config.json comes in with board sync, and the prefix becomes part of a file name.
+export const taskPrefix = (pm) => checkPrefix(readConfig(pm).taskPrefix || 'T');
 
 export function setTaskPrefix(pm, prefix) {
-  if (!PREFIX_RE.test(prefix)) throw new Error(`bad prefix "${prefix}" — uppercase letters and digits, starting with a letter, up to 10`);
+  checkPrefix(prefix);
   fs.writeFileSync(configFile(pm), `${JSON.stringify({ ...readConfig(pm), taskPrefix: prefix }, null, 2)}\n`);
 }
 
@@ -64,6 +70,7 @@ export function listTasks(pm) {
 }
 
 export function readTask(pm, id) {
+  if (!ID_RE.test(`${id}.md`)) throw new Error(`bad task id "${id}" — expected <PREFIX>-NNN, e.g. T-007`);
   const file = path.join(tasksDir(pm), `${id}.md`);
   if (!fs.existsSync(file)) throw new Error(`unknown task ${id}`);
   return readTaskFile(file);
