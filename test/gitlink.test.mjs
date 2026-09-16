@@ -38,8 +38,9 @@ test('reflogSince reads complete lines only and restarts on a shrunken file', ()
   assert.equal(first.offset, Buffer.byteLength(whole));
   assert.deepEqual(reflogSince(file, first.offset).entries, []);
   assert.deepEqual(reflogSince(file, 5).entries.map((e) => e.subject), ['commit (amend): two'], 'a cut line is dropped, not misread');
-  assert.deepEqual(reflogSince(file, 10_000), { entries: [], offset: fs.statSync(file).size });
-  assert.deepEqual(reflogSince(path.join(tmp(), 'missing'), 50), { entries: [], offset: 0 });
+  assert.deepEqual(reflogSince(file, 10_000), { entries: [], offset: fs.statSync(file).size, truncated: true }, 'a shrunken file reports the lost window');
+  assert.deepEqual(reflogSince(path.join(tmp(), 'missing'), 50), { entries: [], offset: 0, truncated: true });
+  assert.equal(reflogSince(file, fs.statSync(file).size).truncated, false, 'nothing new is not a truncation');
 });
 
 test('claim records the branch; only commits after the claim are linked and committed with the board', () => {
@@ -199,4 +200,50 @@ test('describeCommits keeps the stored order and marks SHAs git does not have', 
   assert.deepEqual(gone, { sha: 'deadbeefdead', missing: true });
   assert.equal(second.subject, 'a.txt');
   assert.deepEqual(describeCommits(root, []), []);
+});
+
+test('a reflog shorter than the cursor is reported in the task log instead of silently losing the window', () => {
+  const { root } = setup();
+  boardWithTask(root);
+  cli(['claim', 'T-001'], root);
+  const first = commit(root, 'a.txt');
+  onStop({}, root);
+  const reflog = path.join(root, '.git', 'logs', 'HEAD');
+  fs.writeFileSync(reflog, ''); // git reflog expire, or a worktree recreated under the same name
+  const lost = commit(root, 'b.txt');
+  onStop({}, root);
+  const task = readTask(pmDir(root), 'T-001');
+  assert.deepEqual(task.data.commits, [first], 'the commits of the lost window are not linked');
+  assert.match(task.body, /auto: the reflog is shorter than the capture cursor .* not linked — pm set T-NNN commits=/);
+  assert.ok(!task.body.includes(lost), 'the lost SHA is not invented from anywhere');
+});
+
+test('an amend of an older commit keeps its place in the list', () => {
+  const { root } = setup();
+  boardWithTask(root);
+  cli(['claim', 'T-001'], root);
+  commit(root, 'a.txt');
+  onStop({}, root);
+  const older = head(root);
+  const newer = commit(root, 'b.txt');
+  onStop({}, root);
+  assert.deepEqual(commitsOf(root, 'T-001'), [older, newer]);
+  sh(['switch', '-q', '--detach', older], root);
+  sh(['commit', '-q', '--amend', '-m', 'a amended'], root);
+  const amended = head(root);
+  onStop({}, root);
+  assert.deepEqual(commitsOf(root, 'T-001'), [amended, newer], 'the amended commit stays first, it is still the older one');
+});
+
+test('a bad status is rejected before any commit is captured', () => {
+  const { root } = setup();
+  boardWithTask(root);
+  cli(['claim', 'T-001'], root);
+  commit(root, 'a.txt');
+  const bad = cli(['set', 'T-001', 'status=finished'], root);
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /bad status "finished"/);
+  assert.deepEqual(commitsOf(root, 'T-001'), [], 'nothing was written while the command was going to fail');
+  cli(['set', 'T-001', 'status=done'], root);
+  assert.deepEqual(commitsOf(root, 'T-001'), [head(root)], 'a valid status still flushes the last commits');
 });

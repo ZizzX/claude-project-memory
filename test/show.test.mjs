@@ -27,6 +27,10 @@ test('timelineEvents keeps creation, claims and status changes of this id only, 
     { label: 'done', at: 180, author: 'bob' },
   ]);
   assert.deepEqual(timelineEvents([], 'T-001'), []);
+  // A value can contain anything, including something that looks like a key: the first status= is the real one.
+  assert.deepEqual(timelineEvents(['200	ann	pm: set T-001 status=waiting waiting_on=ответ, потом status=done'], 'T-001'), [
+    { label: 'waiting', at: 200, author: 'ann' },
+  ]);
 });
 
 test('pm show: header, branch, pr, timeline, commits, decisions and dependents; nothing is written', () => {

@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic } from './lib/tasks.mjs';
+import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -101,6 +101,7 @@ const commands = {
     }));
     const pm = requireBoard(cwd);
     const statusChange = 'status' in fields;
+    if (statusChange && !STATUSES.includes(fields.status)) fail(`bad status "${fields.status}"; use ${STATUSES.join(' | ')}`);
     if (statusChange) captureCommits(pm, cwd); // the last commits land while the task is still in progress
     setFields(pm, id, fields, today());
     if (statusChange) startCapture(pm, cwd); // commits made in another status are never linked later

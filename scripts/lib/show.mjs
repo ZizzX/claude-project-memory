@@ -20,14 +20,17 @@ function prLine(pr) {
 // Board history of one task from pm commit subjects ("<unix>\t<author>\t<subject>"), oldest first.
 // A run of the same label keeps its first event: re-claims and repeated statuses add nothing to read.
 export function timelineEvents(lines, id) {
-  const status = new RegExp(`^pm: set ${id} (?:.* )?status=(\\w+)(?: |$)`);
+  // The leftmost `status=` is the argument pm was given; a later one can only sit inside a value
+  // (`waiting_on="… status=done …"`), which a subject built from raw arguments cannot be told apart from a key.
+  const setPrefix = `pm: set ${id} `;
+  const status = /(?:^|\s)status=(\w+)(?:\s|$)/;
   const events = [];
   for (const line of lines) {
     const [at, author, ...rest] = line.split('\t');
     const subject = rest.join('\t');
     const label = subject === `pm: task new ${id}` ? 'created'
       : subject === `pm: claim ${id}` ? 'claimed'
-        : subject.match(status)?.[1];
+        : subject.startsWith(setPrefix) ? subject.slice(setPrefix.length).match(status)?.[1] : undefined;
     if (label && events.at(-1)?.label !== label) events.push({ label, at: Number(at), author });
   }
   return events;

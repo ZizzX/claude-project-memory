@@ -29,12 +29,13 @@ function sizeOf(file) {
 }
 
 // Complete lines after byte `offset`: "<old> <new> <name> <email> <time> <tz>\t<subject>" (git update-ref).
-// A file shorter than the offset (expired reflog) yields nothing and restarts the cursor at its size.
+// A file shorter than the offset (expired reflog, or a worktree recreated under the same name) yields nothing,
+// restarts the cursor at its size and reports `truncated`: the commits of the lost window cannot be linked.
 // ponytail: a reflog rewritten by gc that grew past the offset again is read from a cut line; that line fails
 // the OID check and is dropped. Store the last consumed line in the cursor if this ever loses real commits.
 export function reflogSince(file, offset) {
   const size = sizeOf(file);
-  if (size <= offset) return { entries: [], offset: size };
+  if (size <= offset) return { entries: [], offset: size, truncated: size < offset };
   const buf = Buffer.alloc(size - offset);
   const fd = fs.openSync(file, 'r');
   try {
@@ -48,7 +49,7 @@ export function reflogSince(file, offset) {
     const tab = line.indexOf('\t');
     return { old, sha, subject: tab === -1 ? '' : line.slice(tab + 1) };
   }).filter((e) => OID.test(e.old) && OID.test(e.sha));
-  return { entries, offset: offset + end };
+  return { entries, offset: offset + end, truncated: false };
 }
 
 export function startCapture(pm, cwd) {
@@ -71,8 +72,12 @@ export function captureCommits(pm, cwd, tasks) {
       startCapture(pm, cwd); // claimed before capture existed: start now, no backfill
       return;
     }
-    const { entries, offset } = reflogSince(file, cursor.offset);
+    const { entries, offset, truncated } = reflogSince(file, cursor.offset);
     writeState(pm, cursorName(worktree), { offset });
+    if (truncated) {
+      const line = `- ${today()} · ${worktree} · auto: the reflog is shorter than the capture cursor (expired, or the worktree was recreated); commits made in between are not linked — pm set T-NNN commits=…`;
+      for (const t of open) autoWrite(pm, t.file, () => appendLogLine(pm, t.id, line, today()));
+    }
     const taken = entries.filter((e) => TAKEN.test(e.subject));
     if (!taken.length) return;
     if (open.length > 1) {
@@ -85,9 +90,12 @@ export function captureCommits(pm, cwd, tasks) {
     const before = task.data.commits ?? [];
     const commits = [...before];
     for (const e of taken) {
+      // An amend keeps the commit's place in the list: appending it would put an old commit after newer ones.
       const amended = e.subject.startsWith('commit (amend)') ? commits.indexOf(short(e.old)) : -1;
       if (amended !== -1) commits.splice(amended, 1);
-      if (!commits.includes(short(e.sha))) commits.push(short(e.sha));
+      if (commits.includes(short(e.sha))) continue;
+      if (amended === -1) commits.push(short(e.sha));
+      else commits.splice(amended, 0, short(e.sha));
     }
     if (commits.join() === before.join()) return;
     task.data.commits = commits;
