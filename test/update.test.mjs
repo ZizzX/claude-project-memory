@@ -251,11 +251,15 @@ test('an ambiguous install says nothing, so the command keeps its default scope'
 
 test('pm update prints the two commands when there is something to install', () => {
   withGlobalConfig(() => {
-    const { root, home } = withUpdate();
+    // The CLI runs this repo's plugin.json, so the release ahead is derived from it, not hardcoded.
+    const { version } = readPlugin(path.resolve(import.meta.dirname, '..'));
+    const [major, minor, patch] = version.split('.').map(Number);
+    const latest = `${major}.${minor}.${patch + 1}`;
+    const { root, home } = withUpdate(latest);
     fs.mkdirSync(path.join(home, 'projects'), { recursive: true });
     assert.equal(cli(['init'], root).code, 0);
     const out = cli(['update'], root).out;
-    assert.match(out, /0\.3\.0 → 0\.3\.1 \(marketplace\)/);
+    assert.ok(out.includes(`${version} → ${latest} (marketplace)`), out);
     assert.match(out, /claude plugin update project-memory@project-memory/);
     assert.match(out, /restart Claude Code/);
   });
