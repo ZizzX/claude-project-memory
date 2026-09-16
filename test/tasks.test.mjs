@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp } from './helpers.mjs';
-import { newTask, listTasks, readTask, setFields, claim, appendLog, appendLogLine, lastNext } from '../scripts/lib/tasks.mjs';
+import { newTask, listTasks, readTask, setFields, claim, appendLog, appendLogLine, lastNext, taskPrefix, setTaskPrefix } from '../scripts/lib/tasks.mjs';
 
 const D = '2026-09-12';
 
@@ -27,6 +27,27 @@ test('newTask skips ids that already exist', () => {
   fs.mkdirSync(path.join(pm, 'tasks'));
   fs.writeFileSync(path.join(pm, 'tasks', 'T-005.md'), '---\nid: T-005\ntitle: x\nstatus: todo\norder: 5\n---\n');
   assert.equal(newTask(pm, { title: 'next', date: D }).id, 'T-006');
+});
+
+test('a board prefix names new tasks and keeps counting after the old ids', () => {
+  const pm = tmp();
+  newTask(pm, { title: 'old', date: D });
+  newTask(pm, { title: 'old too', date: D });
+  assert.equal(taskPrefix(pm), 'T');
+  setTaskPrefix(pm, 'PM');
+  assert.equal(taskPrefix(pm), 'PM');
+  const t = newTask(pm, { title: 'new', deps: ['T-002'], date: D });
+  assert.equal(t.id, 'PM-003');
+  assert.equal(newTask(pm, { title: 'next', date: D }).id, 'PM-004');
+  assert.deepEqual(listTasks(pm).map((x) => x.id), ['T-001', 'T-002', 'PM-003', 'PM-004']);
+  assert.deepEqual(readTask(pm, 'PM-003').data.depends_on, ['T-002']);
+});
+
+test('the prefix must be an uppercase key', () => {
+  const pm = tmp();
+  for (const bad of ['pm', 'P-M', '1PM', '', 'ABCDEFGHIJK']) assert.throws(() => setTaskPrefix(pm, bad), /prefix/);
+  setTaskPrefix(pm, 'ATS2');
+  assert.equal(taskPrefix(pm), 'ATS2');
 });
 
 test('setFields validates and normalizes', () => {

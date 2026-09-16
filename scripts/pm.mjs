@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic } from './lib/tasks.mjs';
+import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -29,6 +29,7 @@ const USAGE = `usage: pm <command>
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
+  prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids stay as they are
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -175,6 +176,14 @@ const commands = {
       const focus = e ? currentFocus(pm, e, known) : '';
       return `${e || '(none)'} · ${open}/${ts.length} open${e && !open && ts.length ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
     }).join('\n');
+  },
+
+  prefix(cwd, [key]) {
+    const pm = requireBoard(cwd);
+    if (key === undefined) return taskPrefix(pm);
+    setTaskPrefix(pm, key);
+    persist(pm, `pm: prefix ${key}`);
+    return `task prefix: ${key} — new tasks start at ${idOf(key, nextNumber(pm))}`;
   },
 
   validate(cwd) {

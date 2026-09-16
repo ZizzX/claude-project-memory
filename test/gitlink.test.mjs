@@ -120,7 +120,7 @@ test('two tasks in progress in one worktree: commits are logged as not attribute
   for (const id of ['T-001', 'T-002']) {
     const t = readTask(pmDir(root), id);
     assert.equal(t.data.commits, undefined);
-    assert.match(t.body, new RegExp(`auto: commits not attributed \\(2 tasks in progress\\): ${sha} — pm set T-NNN commits=`));
+    assert.match(t.body, new RegExp(`auto: commits not attributed \\(2 tasks in progress\\): ${sha} — pm set <id> commits=`));
   }
 });
 
@@ -214,7 +214,7 @@ test('a reflog shorter than the cursor is reported in the task log instead of si
   onStop({}, root);
   const task = readTask(pmDir(root), 'T-001');
   assert.deepEqual(task.data.commits, [first], 'the commits of the lost window are not linked');
-  assert.match(task.body, /auto: the reflog is shorter than the capture cursor .* not linked — pm set T-NNN commits=/);
+  assert.match(task.body, /auto: the reflog is shorter than the capture cursor .* not linked — pm set <id> commits=/);
   assert.ok(!task.body.includes(lost), 'the lost SHA is not invented from anywhere');
 });
 

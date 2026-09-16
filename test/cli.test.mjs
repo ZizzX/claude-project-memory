@@ -27,6 +27,20 @@ test('cli: the full local workflow', () => {
   }
 });
 
+test('cli: pm prefix shows and sets the task id prefix, committed to the board', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'old'], root);
+  assert.equal(cli(['prefix'], root).out, 'T');
+  assert.equal(cli(['prefix', 'PM'], root).out, 'task prefix: PM — new tasks start at PM-002');
+  assert.equal(cli(['prefix'], root).out, 'PM');
+  assert.match(cli(['task', 'new', '--title', 'new', '--deps', 'T-001'], root).out, /^PM-002 created/);
+  assert.match(sh(['log', '--format=%s'], pmDir(root)), /pm: prefix PM/);
+  const bad = cli(['prefix', 'pm'], root);
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /bad prefix/);
+});
+
 test('cli: errors exit 1 with a message', () => {
   const { root } = setup();
   const noBoard = cli(['ready'], root);

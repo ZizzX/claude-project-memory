@@ -3,12 +3,31 @@ import path from 'node:path';
 import { parse, serialize } from './frontmatter.mjs';
 
 export const STATUSES = ['todo', 'in_progress', 'waiting', 'done', 'dropped'];
-const ID_RE = /^T-(\d+)\.md$/;
+// Any prefix is read, so tasks created before `pm prefix` keep their T-NNN ids next to the new ones.
+const ID_RE = /^[A-Z][A-Z0-9]*-(\d+)\.md$/;
+const PREFIX_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 const TEMPLATE_BODY = '## Goal\n\n## Understanding\n\n## Checklist\n\n## Log\n';
 const LIST_FIELDS = ['depends_on', 'worktrees', 'links', 'commits'];
 
 export const tasksDir = (pm) => path.join(pm, 'tasks');
-const idOf = (n) => `T-${String(n).padStart(3, '0')}`;
+
+// config.json lives in the board, so every machine that syncs the board uses the same prefix.
+const configFile = (pm) => path.join(pm, 'config.json');
+function readConfig(pm) {
+  try {
+    return JSON.parse(fs.readFileSync(configFile(pm), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+export const taskPrefix = (pm) => readConfig(pm).taskPrefix || 'T';
+
+export function setTaskPrefix(pm, prefix) {
+  if (!PREFIX_RE.test(prefix)) throw new Error(`bad prefix "${prefix}" — uppercase letters and digits, starting with a letter, up to 10`);
+  fs.writeFileSync(configFile(pm), `${JSON.stringify({ ...readConfig(pm), taskPrefix: prefix }, null, 2)}\n`);
+}
+
 const toArray = (v) => (Array.isArray(v) ? v : v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : []);
 
 export function parseOrder(v) {
@@ -54,13 +73,23 @@ export function writeTask(task) {
   fs.writeFileSync(task.file, serialize(task.data, task.body));
 }
 
-// The id is reserved by creating T-NNN.md exclusively, so concurrent processes never share an id.
+// The number continues across all prefixes, so it stays unique on its own.
+export function nextNumber(pm) {
+  const dir = tasksDir(pm);
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  return Math.max(0, ...files.map((f) => Number(f.match(ID_RE)?.[1] ?? 0))) + 1;
+}
+
+export const idOf = (prefix, n) => `${prefix}-${String(n).padStart(3, '0')}`;
+
+// The id is reserved by creating <PREFIX>-NNN.md exclusively, so concurrent processes never share an id.
 export function newTask(pm, { title, order, deps = [], milestone = '', epic = '', links = [], date }) {
   const dir = tasksDir(pm);
   fs.mkdirSync(dir, { recursive: true });
-  let n = Math.max(0, ...fs.readdirSync(dir).map((f) => Number(f.match(ID_RE)?.[1] ?? 0))) + 1;
+  const prefix = taskPrefix(pm);
+  let n = nextNumber(pm);
   for (;;) {
-    const id = idOf(n);
+    const id = idOf(prefix, n);
     const file = path.join(dir, `${id}.md`);
     let fd;
     try {

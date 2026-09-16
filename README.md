@@ -212,6 +212,7 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
 | `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |
 | `pm epics` | Every epic: open/total and its focus line |
+| `pm prefix [KEY]` | Show or set the task id prefix, e.g. `PM` → `PM-051`, for branches like `feat/PM-051/slug`. Stored in the board (`config.json`), so synced machines share it. Existing tasks keep their ids; the number continues |
 | `pm validate` | Check ids, statuses, `waiting` without a reason, unknown or dropped dependencies, cycles |
 | `pm board` | Redraw `BOARD.md` and `board.html`, print the path |
 | `pm summary` | Print the session summary for this worktree |

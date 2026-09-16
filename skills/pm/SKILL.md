@@ -14,7 +14,7 @@ command to run the CLI; below it is written as `pm`. Run it from inside the proj
 | File | Content | How to change it |
 |---|---|---|
 | `PLAN.md` | the repository's goal and milestones, `## Current focus` as one line per epic (`- KEY: what is happening now`), `## Changelog`. Shared by every worktree and direction — never touch another epic's lines | edit in place, then append `- <date> · <what changed> · <why> · D-NNN` to Changelog |
-| `tasks/T-NNN.md` | frontmatter + `## Goal`, `## Understanding`, `## Checklist`, `## Log` | CLI for frontmatter and Log; edit Goal / Understanding / Checklist directly |
+| `tasks/T-NNN.md` (or `<PREFIX>-NNN.md` after `pm prefix`; old ids keep theirs, the number continues) | frontmatter + `## Goal`, `## Understanding`, `## Checklist`, `## Log` | CLI for frontmatter and Log; edit Goal / Understanding / Checklist directly |
 | `decisions.md` | append-only `## D-NNN · date · title` entries | `pm decision` only |
 | `memory/` | Claude Code auto-memory (only when sync is on) | as usual |
 | `BOARD.md`, `board.html` | generated views | never edit |
@@ -80,6 +80,7 @@ pm show T-003                                   branch, MR/PR, timeline, commits
 pm decision --title T --why W --rejected R [--tasks T-001]
 pm ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), of one epic, or all
 pm epics                                        every epic: open/total and its focus line
+pm prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids keep theirs
 pm validate | pm board | pm summary | pm scan | pm help
 pm sync on [--remote url] [--yes] | pm sync off | pm sync
 pm update [later | never | auto | ask]          the update notice: versions, the two commands, snooze or silence it

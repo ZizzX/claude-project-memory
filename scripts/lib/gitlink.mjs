@@ -75,14 +75,14 @@ export function captureCommits(pm, cwd, tasks) {
     const { entries, offset, truncated } = reflogSince(file, cursor.offset);
     writeState(pm, cursorName(worktree), { offset });
     if (truncated) {
-      const line = `- ${today()} · ${worktree} · auto: the reflog is shorter than the capture cursor (expired, or the worktree was recreated); commits made in between are not linked — pm set T-NNN commits=…`;
+      const line = `- ${today()} · ${worktree} · auto: the reflog is shorter than the capture cursor (expired, or the worktree was recreated); commits made in between are not linked — pm set <id> commits=…`;
       for (const t of open) autoWrite(pm, t.file, () => appendLogLine(pm, t.id, line, today()));
     }
     const taken = entries.filter((e) => TAKEN.test(e.subject));
     if (!taken.length) return;
     if (open.length > 1) {
       const shas = taken.map((e) => short(e.sha)).join(', ');
-      const line = `- ${today()} · ${worktree} · auto: commits not attributed (${open.length} tasks in progress): ${shas} — pm set T-NNN commits=…`;
+      const line = `- ${today()} · ${worktree} · auto: commits not attributed (${open.length} tasks in progress): ${shas} — pm set <id> commits=…`;
       for (const t of open) autoWrite(pm, t.file, () => appendLogLine(pm, t.id, line, today()));
       return;
     }
