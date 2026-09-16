@@ -16,6 +16,7 @@ import { buildSummary } from './lib/summary.mjs';
 import { scanPlans } from './lib/scan.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
+import { refreshLatest } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -230,6 +231,12 @@ Re-run with --yes to proceed.`;
 
   _push(cwd, [pm]) {
     pushNow(pm);
+    return '';
+  },
+
+  // Background version check: spawned after a summary, never run by a person.
+  async '_update-check'(cwd, [pm]) {
+    await refreshLatest(pm);
     return '';
   },
 
