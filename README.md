@@ -186,7 +186,7 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 |---|---|
 | `pm init` | Create the board for this repository |
 | `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b]` | Create a task. Without `--epic` it inherits this worktree's epic |
-| `pm set T-003 key=value …` | Change fields: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title` |
+| `pm set T-003 key=value …` | Change fields: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title`, `pr` (the MR/PR URL `pm show` reads) |
 | `pm claim T-003` | Attach this worktree to the task and set `in_progress` |
 | `pm log T-003 --did "…" --next "…"` | Append a work log entry |
 | `pm show T-003` | What the task file does not say: branch, MR/PR state, timeline, commits, decisions, dependents, and the `undo:` block — the exact `git revert` / `git switch -c before/…` commands and their risks. Read-only |

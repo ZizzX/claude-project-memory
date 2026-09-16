@@ -72,7 +72,7 @@ into the board's Archive by itself; there is nothing to close.
 ```
 pm init                                         create the local board
 pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
-pm set T-003 key=value ...                      status, order, depends_on, waiting_on, milestone, epic, links, title
+pm set T-003 key=value ...                      status, order, depends_on, waiting_on, milestone, epic, links, title, pr
 pm claim T-003                                  attach this worktree, status in_progress
 pm log T-003 --did "..." --next "..."           append a Log entry
 pm show T-003                                   branch, MR/PR, timeline, commits, decisions, dependents, undo block

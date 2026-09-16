@@ -187,7 +187,7 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 |---|---|
 | `pm init` | Создать доску для этого репозитория |
 | `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b]` | Создать задачу. Без `--epic` берёт эпик этого worktree |
-| `pm set T-003 key=value …` | Изменить поля: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title` |
+| `pm set T-003 key=value …` | Изменить поля: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title`, `pr` (ссылка на MR/PR, которую читает `pm show`) |
 | `pm claim T-003` | Привязать задачу к этому worktree и поставить `in_progress` |
 | `pm log T-003 --did "…" --next "…"` | Добавить запись в журнал работы |
 | `pm show T-003` | То, чего нет в файле задачи: ветка, состояние MR/PR, таймлайн, коммиты, решения, зависимые задачи и блок `undo:` — точные команды `git revert` / `git switch -c before/…` и их риски. Только чтение |

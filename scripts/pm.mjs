@@ -21,7 +21,7 @@ const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
   init                                         create the local board for this repo
   task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
-  set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, ...)
+  set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, pr, ...)
   claim <id>                                   attach this worktree and set in_progress
   log <id> --did "..." --next "..."            append a work log entry
   show <id>                                    task history: branch, pr, timeline, commits, decisions, dependents
@@ -105,7 +105,8 @@ const commands = {
     if (statusChange) captureCommits(pm, cwd); // the last commits land while the task is still in progress
     setFields(pm, id, fields, today());
     if (statusChange) startCapture(pm, cwd); // commits made in another status are never linked later
-    persist(pm, `pm: set ${id} ${pairs.join(' ')}`);
+    // A value with spaces is quoted, so `pm show` can tell a real key from a `key=value` inside a value.
+    persist(pm, `pm: set ${id} ${pairs.map((p) => (/[\s"]/.test(p) ? JSON.stringify(p) : p)).join(' ')}`);
     return `${id} updated`;
   },
 

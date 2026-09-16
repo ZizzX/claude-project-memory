@@ -27,10 +27,12 @@ test('timelineEvents keeps creation, claims and status changes of this id only, 
     { label: 'done', at: 180, author: 'bob' },
   ]);
   assert.deepEqual(timelineEvents([], 'T-001'), []);
-  // A value can contain anything, including something that looks like a key: the first status= is the real one.
-  assert.deepEqual(timelineEvents(['200	ann	pm: set T-001 status=waiting waiting_on=ответ, потом status=done'], 'T-001'), [
-    { label: 'waiting', at: 200, author: 'ann' },
-  ]);
+  // A value can contain anything, including something that looks like a key; `pm set` quotes such values.
+  const oneLine = (subject) => timelineEvents([`200\tann\t${subject}`], 'T-001').map((e) => e.label);
+  assert.deepEqual(oneLine('pm: set T-001 "waiting_on=ответ, потом status=done" status=waiting'), ['waiting'], 'a key inside a quoted value is not an argument');
+  assert.deepEqual(oneLine('pm: set T-001 status=waiting "waiting_on=потом status=done"'), ['waiting'], 'the order of the arguments does not matter');
+  assert.deepEqual(oneLine('pm: set T-001 status=todo status=done'), ['done'], 'a repeated key resolves the way the CLI resolves it: the last one');
+  assert.deepEqual(oneLine('pm: set T-001 waiting_on=status=done status=waiting'), ['waiting'], 'an unquoted value that contains = is still one token');
 });
 
 test('pm show: header, branch, pr, timeline, commits, decisions and dependents; nothing is written', () => {
@@ -66,6 +68,15 @@ test('pm show: header, branch, pr, timeline, commits, decisions and dependents; 
   assert.equal(lines[8], 'undo:', 'the commit is in HEAD, so an undo block follows');
   assert.equal(sh(['rev-parse', 'HEAD'], pm), head, 'no board commit');
   assert.equal(sh(['status', '--porcelain'], pm), '', 'no board write');
+});
+
+test('pm show: a real set with a spacey value keeps the timeline honest', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'x'], root);
+  const r = cli(['set', 'T-001', 'waiting_on=ответ по датам, потом status=done', 'status=waiting'], root);
+  assert.equal(r.code, 0, r.err);
+  assert.match(cli(['show', 'T-001'], root).out, new RegExp(`\\ntimeline: created ${STAMP} test · waiting ${STAMP} test$`));
 });
 
 test('pm show on a task without git fields prints only what exists', () => {
