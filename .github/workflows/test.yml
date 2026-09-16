@@ -1,6 +1,8 @@
 name: test
 on:
+  # A branch runs through its PR; push only covers master, so one push never runs the matrix twice.
   push:
+    branches: [master]
   pull_request:
 jobs:
   test:
@@ -11,8 +13,8 @@ jobs:
         node: [20, 22]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - run: node --test
