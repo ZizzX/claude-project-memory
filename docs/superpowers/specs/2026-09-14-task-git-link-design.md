@@ -195,6 +195,13 @@ Target selection, first matching case:
 
 `before` line: case 1 → `<sha>^1`; case 2 → `<oldest>^`. Printed as `git switch -c before/T-NNN <base>`.
 
+Additional notes and flags (added during T-032):
+- a one-parent merge SHA of a GitHub PR with more than one commit (`commits` field) is flagged: a squash is reverted
+  whole, a "Rebase and merge" only in its last commit — seen on this repository's PR #1 (3 commits, one parent);
+- a merged MR/PR whose merge/squash SHA is not in the local repository → `note: … git fetch, then pm show again`;
+- when only some task commits are in HEAD → the revert covers those and a note says how many are left out;
+- `(why)` texts: `merge commit of the MR/PR`, `squash commit of the MR/PR`, `the task's commits, newest first`.
+
 `risk` line:
 - tasks in `depended on by` with status `done`;
 - later commits touching the same files: files from `git diff --name-only <base> <target tip>`; commits

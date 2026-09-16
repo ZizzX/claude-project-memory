@@ -42,13 +42,13 @@ test('prRequest builds the API path for one PR or a branch lookup', () => {
 
 test('normalizePr: GitHub merged and open, GitLab merged with squash, bad shapes', () => {
   assert.deepEqual(
-    normalizePr('github', { html_url: 'u', state: 'closed', merged_at: '2026-09-12T23:55:12Z', merge_commit_sha: 'abc', user: { login: 'ZizzX' } }),
-    { url: 'u', state: 'merged', mergedAt: Date.parse('2026-09-12T23:55:12Z') / 1000, mergeSha: 'abc', squashSha: null, author: 'ZizzX' },
+    normalizePr('github', { html_url: 'u', state: 'closed', merged_at: '2026-09-12T23:55:12Z', merge_commit_sha: 'abc', commits: 3, user: { login: 'ZizzX' } }),
+    { url: 'u', state: 'merged', mergedAt: Date.parse('2026-09-12T23:55:12Z') / 1000, mergeSha: 'abc', squashSha: null, commitCount: 3, author: 'ZizzX' },
   );
   assert.equal(normalizePr('github', { html_url: 'u', state: 'open', merged_at: null, merge_commit_sha: 'test-merge', user: { login: 'a' } }).mergeSha, null, 'an open PR only has a test merge');
   assert.deepEqual(
     normalizePr('gitlab', { web_url: 'w', state: 'merged', merged_at: '2026-09-10T09:02:00.000Z', merge_commit_sha: null, squash_commit_sha: 'sq', author: { username: 'aziz' } }),
-    { url: 'w', state: 'merged', mergedAt: Date.parse('2026-09-10T09:02:00.000Z') / 1000, mergeSha: null, squashSha: 'sq', author: 'aziz' },
+    { url: 'w', state: 'merged', mergedAt: Date.parse('2026-09-10T09:02:00.000Z') / 1000, mergeSha: null, squashSha: 'sq', commitCount: null, author: 'aziz' },
   );
   assert.equal(normalizePr('gitlab', { web_url: 'w', state: 'opened' }).state, 'open');
   assert.equal(normalizePr('github', { message: 'Not Found' }), null);

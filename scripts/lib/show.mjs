@@ -3,6 +3,7 @@ import { readTask, listTasks } from './tasks.mjs';
 import { decisionsFor } from './decisions.mjs';
 import { describeCommits } from './gitlink.mjs';
 import { prInfo } from './forge.mjs';
+import { undoPlan, undoLines } from './undo.mjs';
 
 const stamp = (unix) => new Date(unix * 1000).toLocaleString('sv-SE').slice(0, 16);
 
@@ -57,7 +58,10 @@ export function showTask(pm, cwd, id) {
   }
   const decisions = decisionsFor(pm, id);
   if (decisions.length) lines.push(`decisions: ${decisions.map((d) => `${d.id} ${d.title}`).join(' · ')}`);
-  const dependents = listTasks(pm).filter((t) => t.data.depends_on.includes(id));
+  const tasks = listTasks(pm);
+  const dependents = tasks.filter((t) => t.data.depends_on.includes(id));
   if (dependents.length) lines.push(`depended on by: ${dependents.map((t) => `${t.id} (${t.data.status})`).join(', ')}`);
+  const plan = undoPlan({ cwd, id, tasks, commits, pr });
+  if (plan) lines.push(...undoLines(plan));
   return lines.join('\n');
 }

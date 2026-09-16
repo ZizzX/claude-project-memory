@@ -59,7 +59,7 @@ test('pm show: header, branch, pr, timeline, commits, decisions and dependents; 
   assert.match(lines[5], new RegExp(`^  ${sha} ${STAMP} test  feat: csv writer$`));
   assert.equal(lines[6], 'decisions: D-001 stream rows');
   assert.equal(lines[7], 'depended on by: T-002 (todo)');
-  assert.equal(lines.length, 8);
+  assert.equal(lines[8], 'undo:', 'the commit is in HEAD, so an undo block follows');
   assert.equal(sh(['rev-parse', 'HEAD'], pm), head, 'no board commit');
   assert.equal(sh(['status', '--porcelain'], pm), '', 'no board write');
 });
@@ -78,7 +78,7 @@ test('pm show: no linked commits yet is explained; a rewritten SHA is marked', (
   cli(['claim', 'T-001'], root);
   assert.match(cli(['show', 'T-001'], root).out, /\ncommits: none linked yet — commits made in this worktree after pm claim appear here$/);
   cli(['set', 'T-001', 'commits=deadbeefdead'], root);
-  assert.match(cli(['show', 'T-001'], root).out, /\ncommits \(1\):\n {2}deadbeefdead \(rewritten — not in this repository\)$/);
+  assert.match(cli(['show', 'T-001'], root).out, /\ncommits \(1\):\n {2}deadbeefdead \(rewritten — not in this repository\)\n/);
 });
 
 test('pm show: an MR found by branch on a GitLab origin; a PR the forge has no data for says so', () => {

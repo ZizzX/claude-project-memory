@@ -50,6 +50,7 @@ export function normalizePr(kind, json) {
       mergedAt: unix(json.merged_at),
       mergeSha: merged ? json.merge_commit_sha ?? null : null,
       squashSha: null,
+      commitCount: json.commits ?? null,
       author: json.user?.login ?? '',
     };
   }
@@ -60,6 +61,7 @@ export function normalizePr(kind, json) {
     mergedAt: unix(json.merged_at),
     mergeSha: json.merge_commit_sha ?? null,
     squashSha: json.squash_commit_sha ?? null,
+    commitCount: null,
     author: json.author?.username ?? '',
   };
 }
