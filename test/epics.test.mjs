@@ -189,7 +189,9 @@ test('board without epics: Done is not capped, html has no archive block', () =>
   const md = fs.readFileSync(`${pm}/BOARD.md`, 'utf8');
   assert.match(md, /## Done \(7\)\n- \*\*T-001\*\* d0\n/);
   assert.doesNotMatch(md, /shown|Archive/);
-  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<\/main>\n<\/body>/);
+  const html = fs.readFileSync(`${pm}/board.html`, 'utf8');
+  assert.doesNotMatch(html, /class="archive"|id="lanes"|<script>/);
+  assert.match(html, /<h2>Done · 7<\/h2>/);
 });
 
 test('archive: a closed epic collapses to one line, its done tasks still satisfy dependencies', () => {
@@ -214,7 +216,7 @@ test('archive: a closed epic collapses to one line, its done tasks still satisfy
   assert.match(md, /\n## Archive\n- A · 2 done · 2026-09-13\n$/);
   assert.doesNotMatch(md, /\*\*T-001\*\*|\*\*T-003\*\*|\*\*T-005\*\*/, 'no card for an archived or dropped task');
   assert.match(md, /## Done \(1\)\n- \*\*T-004\*\* plain-done\n/);
-  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<\/main><details class="archive"[^>]*><summary>Archive · 1<\/summary><div>A · 2 done · 2026-09-13<\/div><\/details>/);
+  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<details class="archive"><summary>Archive · 1<\/summary><div>A · 2 done · 2026-09-13<\/div><\/details>/);
   // One reopened task brings the epic back to the columns; Done is capped in the view only.
   for (let i = 0; i < 6; i += 1) setFields(pm, newTask(pm, { title: `a${i}`, epic: 'A', date: D }).id, { status: 'done' }, D);
   newTask(pm, { title: 'a-again', epic: 'A', date: D });
