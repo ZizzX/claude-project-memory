@@ -1,6 +1,6 @@
 ---
 name: pm
-description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo T-007", "enable board sync", "connect the board" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "продолжим в новой сессии", "план меняется", "ждём", "откати", "включи синхронизацию доски", "подключи доску"); when a task is finished or partially finished; and when a plan from another tool was just written.
+description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "продолжим в новой сессии", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску"); when a task is finished or partially finished; and when a plan from another tool was just written.
 ---
 
 # pm — project memory
@@ -43,7 +43,11 @@ into the board's Archive by itself; there is nothing to close.
 | "remember …" | Exactly one place: a decision → `pm decision`; a durable fact about the user or project → auto-memory; a detail of a task → that task's `## Understanding`. |
 | "the plan changes" | Edit `PLAN.md` — only your epic's focus line and your own sections — append a Changelog line, record a decision. |
 | "waiting for …" | `pm set T-NNN status=waiting waiting_on="…"`. |
-| "undo T-007", "undo that" | `git -C <pm dir> log --oneline -5`, then `git -C <pm dir> revert --no-edit <sha>` for the board change in question; `pm board`. |
+| "undo that", "undo the board change" | `git -C <pm dir> log --oneline -5`, then `git -C <pm dir> revert --no-edit <sha>` for the board change in question; `pm board`. |
+| "undo the code of T-007", "remove the changes of T-007" | `pm show T-007`, show the user its `undo:` block with the risks and wait for an explicit yes — pm never runs a destructive git command on code itself (D-011). Uncommitted changes in the worktree → stop and ask. Then `pm task new --title "<undo T-007>" --epic <T-007's epic>`, claim it, branch `revert/T-007` (this worktree already has a task in progress → propose a separate worktree or pausing it first, so the revert commits are attributed to the undo task), run the printed `revert` command. On conflict: stop, show the conflicted files, resolve together or `git revert --abort`. Finally `pm log T-007 --did "undone in T-0NN"` and ask whether T-007 becomes `todo` (redo) or `dropped`. |
+| "go back to the state before T-007" | Offer, safest first: (1) `git switch -c before/T-007 <base>` from the `before:` line — nothing is lost; (2) make this branch equal that state by reverting every commit in `<base>..HEAD` — first list every other task whose `commits` fall in that range, they are undone too; (3) `git reset --hard <base>` only when `git branch -r --contains` is empty for those commits and the user confirms, after `git branch backup/T-007-<date>`. Never force-push. |
+| "undo T-007" with no qualifier | Ask which one: the board change, the code of the task, or the state before it. |
+| An MR/PR was created for the task | `pm set T-NNN pr=<url>` — `pm show` then reads its state, merge SHA and author, and the undo block targets the merge commit. |
 | A `[pm] plan updated: <path>` line appears | Reconcile: new coarse items → tasks with a link to the plan; items removed from the plan → `status=dropped`. Do not copy the plan's content. |
 | No board yet and non-trivial multi-step work starts | `pm init`, fill `PLAN.md` at the repository level: the goal of the product/repo, milestones, `## Current focus` as one line per epic, Changelog. The plan of one direction is a separate file (superpowers, gstack, plan mode) linked from its tasks with `--links` — never copied into `PLAN.md`. Then `pm scan` and import old plans (all boxes ticked → done, some → in_progress, none → todo). Announce it in the board diff line. |
 | "enable board sync" / "connect the board" | Run `pm sync on` (no `--yes`) and show the user where the board and memory will be pushed. Only after the user says yes: `pm sync on --yes`. Never enable sync on your own initiative. |
@@ -71,6 +75,7 @@ pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic 
 pm set T-003 key=value ...                      status, order, depends_on, waiting_on, milestone, epic, links, title
 pm claim T-003                                  attach this worktree, status in_progress
 pm log T-003 --did "..." --next "..."           append a Log entry
+pm show T-003                                   branch, MR/PR, timeline, commits, decisions, dependents, undo block
 pm decision --title T --why W --rejected R [--tasks T-001]
 pm ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), of one epic, or all
 pm epics                                        every epic: open/total and its focus line

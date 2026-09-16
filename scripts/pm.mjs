@@ -40,8 +40,11 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "waiting for …"                              mark the active task blocked, with the reason
   "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
   "the plan changes"                           edit PLAN.md, add a Changelog line and a decision
-  "undo T-007"                                 revert that board change
+  "undo that" / "undo the board change"        revert that change of the board itself
+  "undo the code of T-007"                     show the undo block, ask, then revert the task's commits
+  "go back to the state before T-007"          offer the safe branch first, the dangerous ways only on request
   "enable board sync" / "connect the board"    opt-in sync across machines (asks before pushing)
+After creating an MR/PR for a task: pm set T-NNN pr=<url> — pm show then reads its state and merge SHA.
 Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme`;
 
 class UsageError extends Error {}
