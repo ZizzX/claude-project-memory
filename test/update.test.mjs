@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { setup, tmp } from './helpers.mjs';
+import { setup, tmp, cli } from './helpers.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
-import { isNewer, readPlugin, marketplaceVersion, rawUrl, fetchLatest, refreshLatest, updateAvailable, networkCheckEnabled } from '../scripts/lib/update.mjs';
+import { isNewer, readPlugin, marketplaceVersion, rawUrl, fetchLatest, refreshLatest, updateAvailable, networkCheckEnabled, updateLine, notifyMode, setMode, snooze, snoozed } from '../scripts/lib/update.mjs';
 
 const PLUGIN = { name: 'project-memory', version: '0.3.0', repository: 'https://github.com/ZizzX/claude-project-memory' };
 const URL_0_3_1 = 'https://raw.githubusercontent.com/ZizzX/claude-project-memory/HEAD/.claude-plugin/plugin.json';
@@ -121,4 +121,81 @@ test('the network check is opt-out per user', () => {
   assert.equal(networkCheckEnabled(root), true);
   fs.appendFileSync(path.join(root, '.git', 'config'), '[pm]\n\tupdateCheckNetwork = false\n');
   assert.equal(networkCheckEnabled(root), false);
+});
+
+// Preferences are per user (git config --global): a temp file keeps the real one untouched.
+function withGlobalConfig(fn) {
+  const file = path.join(tmp(), 'gitconfig');
+  fs.writeFileSync(file, '');
+  const prev = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = file;
+  try {
+    return fn(file);
+  } finally {
+    if (prev === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = prev;
+  }
+}
+
+// A board plus a marketplace copy one release ahead of PLUGIN.
+function withUpdate(latest = '0.3.1') {
+  const { home, root } = setup();
+  const pm = tmp();
+  marketplaces(home, { 'project-memory': { installLocation: pluginDir(latest) } });
+  return { home, root, pm };
+}
+
+test('the line names both versions and the four things the user can say', () => {
+  withGlobalConfig(() => {
+    const { root, pm } = withUpdate();
+    assert.equal(
+      updateLine({ pm, cwd: root, plugin: PLUGIN }),
+      '[pm] update available: 0.3.0 → 0.3.1 — say "update the plugin", "later", "never" or "update it yourself"',
+    );
+    assert.equal(updateLine({ pm, cwd: root, plugin: { ...PLUGIN, version: '0.3.1' } }), ''); // nothing newer
+  });
+});
+
+test('never silences the line; auto tells Claude to update without asking', () => {
+  withGlobalConfig(() => {
+    const { root, pm } = withUpdate();
+    assert.equal(setMode(root, 'never'), 'never');
+    assert.equal(notifyMode(root), 'never');
+    assert.equal(updateLine({ pm, cwd: root, plugin: PLUGIN }), '');
+    setMode(root, 'auto');
+    assert.match(updateLine({ pm, cwd: root, plugin: PLUGIN }), /^\[pm\] update available: 0\.3\.0 → 0\.3\.1 — pm\.updateNotify=auto: update it now/);
+    setMode(root, 'ask');
+    assert.equal(notifyMode(root), 'ask');
+    assert.throws(() => setMode(root, 'sometimes'), /bad mode/);
+  });
+});
+
+test('"later" is silent for a week, but a newer release than the snoozed one still speaks up', () => {
+  withGlobalConfig(() => {
+    const { home, root, pm } = withUpdate();
+    const until = snooze(root, '0.3.1', 7, Date.parse('2026-09-16T12:00:00Z'));
+    assert.equal(until, '2026-09-23');
+    assert.equal(snoozed(root, '0.3.1', '2026-09-20'), true);
+    assert.equal(snoozed(root, '0.3.1', '2026-09-24'), false); // expired
+    assert.equal(snoozed(root, '0.4.0', '2026-09-20'), false); // a newer release than the snoozed one
+    assert.equal(updateLine({ pm, cwd: root, now: Date.parse('2026-09-20T12:00:00Z'), plugin: PLUGIN }), '');
+    marketplaces(home, { 'project-memory': { installLocation: pluginDir('0.4.0') } });
+    assert.match(updateLine({ pm, cwd: root, now: Date.parse('2026-09-20T12:00:00Z'), plugin: PLUGIN }), /0\.3\.0 → 0\.4\.0/);
+    assert.equal(setMode(root, 'ask'), 'ask'); // setting the mode clears the snooze
+    assert.equal(snoozed(root, '0.3.1', '2026-09-20'), false);
+  });
+});
+
+test('pm update reports the state and stores the answer', () => {
+  withGlobalConfig(() => {
+    const { root, home } = withUpdate();
+    fs.mkdirSync(path.join(home, 'projects'), { recursive: true });
+    const boot = cli(['init'], root);
+    assert.equal(boot.code, 0, boot.err);
+    assert.match(cli(['update'], root).out, /notify: ask/);
+    assert.equal(cli(['update', 'never'], root).out, 'pm.updateNotify=never');
+    assert.match(cli(['update'], root).out, /notify: never/);
+    assert.match(cli(['update', 'later'], root).out, /^reminded again after \d{4}-\d{2}-\d{2}/);
+    assert.equal(cli(['update', 'nonsense'], root).code, 1);
+  });
 });

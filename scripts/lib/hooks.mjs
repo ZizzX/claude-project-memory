@@ -8,6 +8,7 @@ import { listTasks, appendLogLine, validate } from './tasks.mjs';
 import { writeBoard } from './board.mjs';
 import { buildSummary } from './summary.mjs';
 import { pull, conflictFiles, unpushedOverDay, sharedBoardHint, linkMemory, memorySyncEnabled } from './sync.mjs';
+import { updateLine } from './update.mjs';
 
 // ponytail: one global threshold; per-project config only if users ask for it.
 export const STALE_MINUTES = 20;
@@ -85,7 +86,9 @@ export function onSessionStart(input, cwd) {
   // A missing session_id means no stdin reached us (a plugin reload, not a real session start).
   // Keying state as "undefined" pools unrelated runs into one window; the summary still prints.
   if (input.session_id) writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
-  return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine: status, tasks });
+  const notice = updateLine({ pm, cwd }); // never blocks: local sources plus the cached network result
+  const statusLine = [status, notice].filter(Boolean).join('\n');
+  return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine, tasks });
 }
 
 export function onPostToolUse(input, cwd) {

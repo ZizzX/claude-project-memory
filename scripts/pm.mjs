@@ -16,7 +16,7 @@ import { buildSummary } from './lib/summary.mjs';
 import { scanPlans } from './lib/scan.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
-import { refreshLatest } from './lib/update.mjs';
+import { refreshLatest, updateAvailable, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -31,6 +31,7 @@ const USAGE = `usage: pm <command>
   epics                                        every epic with open/total and its focus line
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
+  update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
   help                                         this list, plus what to say to Claude in a session
   hook <event>                                 hook entry point (used by the plugin)`;
 
@@ -227,6 +228,21 @@ Re-run with --yes to proceed.`;
     writeBoard(pm);
     if (r === 'conflict') return conflictHelp(pm);
     return r === 'ok' ? 'synced' : 'offline — changes are committed locally and will be pushed later';
+  },
+
+  update(cwd, [sub]) {
+    const pm = requireBoard(cwd);
+    const found = updateAvailable({ pm, cwd });
+    if (sub === 'later') return `reminded again after ${snooze(cwd, found?.latest)}${found ? '' : ' (no newer version is known right now)'}`;
+    if (sub && MODES.includes(sub)) {
+      setMode(cwd, sub);
+      return `pm.updateNotify=${sub}`;
+    }
+    if (sub) fail(`usage: pm update [later | ${MODES.join(' | ')}]`);
+    const mode = notifyMode(cwd);
+    const state = found ? `${found.current} → ${found.latest} (${found.source})` : 'no newer version known';
+    return `${state}
+notify: ${mode}${found && snoozed(cwd, found.latest, today()) ? ' · snoozed' : ''}`;
   },
 
   _push(cwd, [pm]) {
