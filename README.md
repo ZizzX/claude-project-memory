@@ -37,7 +37,19 @@ Requires Node ≥ 20 and git. Works on macOS, Linux and Windows. No dependencies
 
 Restart Claude Code (a new process, not `/clear`) so the hooks load.
 
-**Update:**
+**Update:** when a newer version is already on this machine or has been released, the session summary says so:
+
+```
+[pm] update available: 0.3.0 → 0.3.1 — say "update the plugin", "later", "never" or "update it yourself"
+```
+
+Say **"update the plugin"** and Claude installs it and tells you to restart; **"later"** snoozes it for
+7 days (a newer release than that one still speaks up), **"never"** stops the notice for good, and
+**"update it yourself, do not ask"** lets Claude install new versions on its own from then on — it still
+reports what landed. Your answer is stored in `git config --global`: `pm.updateNotify` (`ask` | `auto` |
+`never`) and `pm.updateSnoozeUntil`. Nothing is installed without your yes.
+
+By hand it is:
 
 ```
 /plugin marketplace update project-memory
@@ -45,6 +57,10 @@ Restart Claude Code (a new process, not `/clear`) so the hooks load.
 ```
 
 Then restart Claude Code again.
+
+The check costs two local file reads: the copy of the marketplace Claude Code already keeps. Once a day
+it also reads the released `plugin.json` over HTTPS, in a background process that never delays a session —
+turn that off with `git config --global pm.updateCheckNetwork false`; the local check keeps working.
 
 ## Quick start
 
@@ -90,6 +106,8 @@ Run it from inside the project. The session summary also prints the exact CLI pa
 | "undo the code of T-007", "remove the changes of T-007" | Shows the `undo:` block of `pm show T-007` with its risks, waits for your yes, then reverts the task's commits in a new undo task on a `revert/T-007` branch |
 | "go back to the state before T-007" | Offers `git switch -c before/T-007 <base>` first — nothing is lost; the destructive ways only if you ask for them |
 | "enable board sync", "connect the board" | Shows where the board would be pushed and waits for your yes |
+| "update the plugin", "later", "never", "I'll do it myself" | Answers the `[pm] update available` line: installs the new version, snoozes it for 7 days, silences it, or just shows you the commands |
+| "update it yourself, do not ask" | `pm.updateNotify=auto` — from then on Claude installs new versions without asking and reports what landed |
 
 "undo T-007" on its own is ambiguous, so Claude asks which one you mean: the board change, the code of the
 task, or the state the repository was in before it. The plugin never runs a destructive git command on your
@@ -100,7 +118,8 @@ merge SHA and author, and the undo block targets the merge commit instead of the
 
 Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили»,
 «продолжим в новой сессии», «план меняется», «ждём», «отмени правку доски», «откати код T-007»,
-«вернись к состоянию до T-007», «включи синхронизацию доски», «подключи доску».
+«вернись к состоянию до T-007», «включи синхронизацию доски», «подключи доску», «обнови плагин»,
+«позже», «не напоминай», «обновляй сам».
 
 Every turn that changed the board ends with one line in your language, such as
 `board: T-003 → done · new T-007 "data migration" (after T-005) · D-004`.
@@ -198,6 +217,7 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 | `pm summary` | Print the session summary for this worktree |
 | `pm scan` | List plan files in `docs/superpowers/plans`, `docs/superpowers/specs`, `docs/designs`, `.dev-cycle/tasks` and gstack ceo-plans, with checkbox progress |
 | `pm sync on [--remote url] [--yes]` · `pm sync off` · `pm sync` | Opt-in sync across machines |
+| `pm update [later \| never \| auto \| ask]` | The update notice: current and available version, the two commands to install it, and how it behaves from now on |
 | `pm help` | All of the above, plus the phrases. `--help` after any command shows the same |
 
 Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `done`, `dropped`.

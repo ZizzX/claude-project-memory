@@ -1,6 +1,6 @@
 ---
 name: pm
-description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "продолжим в новой сессии", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску"); when a task is finished or partially finished; and when a plan from another tool was just written.
+description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "update the plugin", "later", "never", "update it yourself" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "продолжим в новой сессии", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску", "обнови плагин", "позже", "не напоминай", "обновляй сам"); when a task is finished or partially finished; and when a plan from another tool was just written.
 ---
 
 # pm — project memory
@@ -53,6 +53,7 @@ into the board's Archive by itself; there is nothing to close.
 | "enable board sync" / "connect the board" | Run `pm sync on` (no `--yes`) and show the user where the board and memory will be pushed. Only after the user says yes: `pm sync on --yes`. Never enable sync on your own initiative. |
 | "disable board sync" | `pm sync off`. |
 | "stop syncing my memory" | `git config pm.syncMemory false` only stops *future* linking — it does not undo an already-active link. Tell the user this, then do it manually: move `pm/memory` back to `<claude-home>/projects/<repo-key>/memory` and remove the link/junction. |
+| `[pm] update available: <old> → <new> …` in the summary | Offer the five options, do exactly what the user picks, and never change what is installed on your own initiative (the D-011 rule). `pm update` prints this machine's two commands. "update the plugin" → run them, then report the version that landed and that a full restart is needed (a new process, not `/clear`). "later" → `pm update later` (silent for 7 days; a release newer than that one still speaks up). "I'll do it myself" → show the two commands, then `pm update later`. "never" → `pm update never`. "update it yourself, do not ask" → `pm update auto`, then update right away. A line that already says `pm.updateNotify=auto` is the user's standing yes: update without asking and report what landed — an auto run is never silent. |
 | `[pm] sync conflict …` in the summary | Run `pm sync`, follow its instructions, merge the listed markdown files by hand keeping both sides' information, then `pm sync` again. |
 | `[pm] Code changed but the board was not updated …` (Stop hook) | Log progress on the active task, or create/claim one, or reply that there is nothing to track. |
 
@@ -81,4 +82,5 @@ pm ready [--epic KEY | --all]                   ready tasks of this worktree's e
 pm epics                                        every epic: open/total and its focus line
 pm validate | pm board | pm summary | pm scan | pm help
 pm sync on [--remote url] [--yes] | pm sync off | pm sync
+pm update [later | never | auto | ask]          the update notice: versions, the two commands, snooze or silence it
 ```

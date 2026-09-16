@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { setup, tmp, cli } from './helpers.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
-import { isNewer, readPlugin, marketplaceVersion, rawUrl, fetchLatest, refreshLatest, updateAvailable, networkCheckEnabled, updateLine, notifyMode, setMode, snooze, snoozed } from '../scripts/lib/update.mjs';
+import { isNewer, readPlugin, marketplaceEntry, updateCommands, rawUrl, fetchLatest, refreshLatest, updateAvailable, networkCheckEnabled, updateLine, notifyMode, setMode, snooze, snoozed } from '../scripts/lib/update.mjs';
 
 const PLUGIN = { name: 'project-memory', version: '0.3.0', repository: 'https://github.com/ZizzX/claude-project-memory' };
 const URL_0_3_1 = 'https://raw.githubusercontent.com/ZizzX/claude-project-memory/HEAD/.claude-plugin/plugin.json';
@@ -51,18 +51,18 @@ test('readPlugin: a plugin.json next to the given root, or null', () => {
   assert.equal(readPlugin(tmp()), null);
 });
 
-test('marketplaceVersion finds the plugin by name and survives a missing or broken file', () => {
+test('marketplaceEntry finds the plugin by name and survives a missing or broken file', () => {
   const home = tmp('pm-home-');
-  assert.equal(marketplaceVersion('project-memory', home), null);
+  assert.equal(marketplaceEntry('project-memory', home), null);
   marketplaces(home, {
     other: { installLocation: pluginDir('9.9.9', 'something-else') },
     'project-memory': { installLocation: pluginDir('0.3.1') },
     gone: { installLocation: path.join(home, 'nowhere') },
   });
-  assert.equal(marketplaceVersion('project-memory', home), '0.3.1');
-  assert.equal(marketplaceVersion('not-installed', home), null);
+  assert.deepEqual(marketplaceEntry('project-memory', home), { key: 'project-memory', version: '0.3.1' });
+  assert.equal(marketplaceEntry('not-installed', home), null);
   fs.writeFileSync(path.join(home, 'plugins', 'known_marketplaces.json'), '{broken');
-  assert.equal(marketplaceVersion('project-memory', home), null);
+  assert.equal(marketplaceEntry('project-memory', home), null);
 });
 
 test('rawUrl: GitHub only', () => {
@@ -197,5 +197,27 @@ test('pm update reports the state and stores the answer', () => {
     assert.match(cli(['update'], root).out, /notify: never/);
     assert.match(cli(['update', 'later'], root).out, /^reminded again after \d{4}-\d{2}-\d{2}/);
     assert.equal(cli(['update', 'nonsense'], root).code, 1);
+  });
+});
+
+test('updateCommands names this machine\'s marketplace key, or nothing when the plugin is not from one', () => {
+  const home = tmp('pm-home-');
+  assert.deepEqual(updateCommands(PLUGIN, home), []);
+  marketplaces(home, { 'my-tools': { installLocation: pluginDir('0.3.1') } });
+  assert.deepEqual(updateCommands(PLUGIN, home), [
+    'claude plugin marketplace update my-tools',
+    'claude plugin update project-memory@my-tools',
+  ]);
+});
+
+test('pm update prints the two commands when there is something to install', () => {
+  withGlobalConfig(() => {
+    const { root, home } = withUpdate();
+    fs.mkdirSync(path.join(home, 'projects'), { recursive: true });
+    assert.equal(cli(['init'], root).code, 0);
+    const out = cli(['update'], root).out;
+    assert.match(out, /0\.3\.0 → 0\.3\.1 \(marketplace\)/);
+    assert.match(out, /claude plugin update project-memory@project-memory/);
+    assert.match(out, /restart Claude Code/);
   });
 });

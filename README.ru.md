@@ -37,7 +37,19 @@ project-memory держит одну небольшую доску на репо
 
 Перезапустите Claude Code (новый процесс, `/clear` не подойдёт), чтобы загрузились хуки.
 
-**Обновление:**
+**Обновление:** когда новая версия уже есть на этой машине или вышла в репозитории, сводка сессии сама скажет:
+
+```
+[pm] update available: 0.3.0 → 0.3.1 — say "update the plugin", "later", "never" or "update it yourself"
+```
+
+Скажите **«обнови плагин»** — Claude поставит новую версию и напомнит перезапуститься; **«позже»** —
+молчит 7 дней (релиз новее засноуженного всё равно напомнит о себе), **«не напоминай»** — молчит навсегда,
+**«обновляй сам, не спрашивай»** — дальше Claude ставит новые версии сам и всё равно сообщает, что поставил.
+Ответ хранится в `git config --global`: `pm.updateNotify` (`ask` | `auto` | `never`) и `pm.updateSnoozeUntil`.
+Без вашего «да» ничего не ставится.
+
+Руками это:
 
 ```
 /plugin marketplace update project-memory
@@ -45,6 +57,11 @@ project-memory держит одну небольшую доску на репо
 ```
 
 После этого снова перезапустите Claude Code.
+
+Проверка стоит двух чтений локальных файлов — копии маркетплейса, которую Claude Code и так держит у себя.
+Раз в сутки плагин дополнительно читает выпущенный `plugin.json` по HTTPS, отдельным фоновым процессом,
+который никогда не задерживает сессию; выключается через `git config --global pm.updateCheckNetwork false`,
+локальная проверка при этом продолжает работать.
 
 ## Быстрый старт
 
@@ -90,6 +107,8 @@ node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
 | «откати код T-007», «удали изменения T-007» | Показывает блок `undo:` из `pm show T-007` вместе с рисками, ждёт вашего «да» и откатывает коммиты задачи в новой задаче отката, в ветке `revert/T-007` |
 | «вернись к состоянию до T-007» | Сначала предлагает `git switch -c before/T-007 <base>` — ничего не теряется; разрушающие варианты только если вы их попросите |
 | «включи синхронизацию доски», «подключи доску» | Показывает, куда будет отправлена доска, и ждёт вашего «да» |
+| «обнови плагин», «позже», «не напоминай», «сам обновлю» | Ответ на строку `[pm] update available`: поставить новую версию, отложить на 7 дней, замолчать навсегда или просто показать команды |
+| «обновляй сам, не спрашивай» | `pm.updateNotify=auto` — дальше Claude ставит новые версии без вопроса и сообщает, что поставил |
 
 Просто «откати T-007» — двусмысленно, поэтому Claude переспросит, что именно: правку доски, код задачи
 или состояние репозитория до неё. Плагин сам не выполняет разрушающих git-команд над вашим кодом — он
@@ -100,7 +119,8 @@ node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
 
 Английские фразы тоже работают: "what's next?", "take the next one", "break it down", "remember …",
 "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that",
-"undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board".
+"undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board",
+"update the plugin", "later", "never", "update it yourself".
 
 Каждый ход, в котором менялась доска, заканчивается одной строкой на вашем языке, например
 `доска: T-003 → done · новая T-007 «миграция данных» (после T-005) · D-004`.
@@ -199,6 +219,7 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 | `pm summary` | Напечатать сводку сессии для этого worktree |
 | `pm scan` | Показать файлы планов в `docs/superpowers/plans`, `docs/superpowers/specs`, `docs/designs`, `.dev-cycle/tasks` и ceo-plans gstack с прогрессом по чекбоксам |
 | `pm sync on [--remote url] [--yes]` · `pm sync off` · `pm sync` | Синхронизация между машинами, только по желанию |
+| `pm update [later \| never \| auto \| ask]` | Уведомление об обновлении: текущая и доступная версия, две команды для установки и как вести себя дальше |
 | `pm help` | Всё перечисленное плюс фразы. `--help` после любой команды показывает то же |
 
 Статусы: `todo`, `in_progress`, `waiting` (нужен `waiting_on`), `done`, `dropped`.

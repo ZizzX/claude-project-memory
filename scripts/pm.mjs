@@ -16,7 +16,7 @@ import { buildSummary } from './lib/summary.mjs';
 import { scanPlans } from './lib/scan.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
-import { refreshLatest, updateAvailable, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
+import { refreshLatest, updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -46,6 +46,8 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "undo the code of T-007"                     show the undo block, ask, then revert the task's commits
   "go back to the state before T-007"          offer the safe branch first, the dangerous ways only on request
   "enable board sync" / "connect the board"    opt-in sync across machines (asks before pushing)
+  "update the plugin" / "later" / "never"      after a [pm] update available line: install it, snooze it 7 days, or stop asking
+  "update it yourself, do not ask"             pm.updateNotify=auto — Claude installs new versions and reports them
 After creating an MR/PR for a task: pm set T-NNN pr=<url> — pm show then reads its state and merge SHA.
 Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme`;
 
@@ -241,8 +243,8 @@ Re-run with --yes to proceed.`;
     if (sub) fail(`usage: pm update [later | ${MODES.join(' | ')}]`);
     const mode = notifyMode(cwd);
     const state = found ? `${found.current} → ${found.latest} (${found.source})` : 'no newer version known';
-    return `${state}
-notify: ${mode}${found && snoozed(cwd, found.latest, today()) ? ' · snoozed' : ''}`;
+    const how = found ? updateCommands().map((c) => `  ${c}`) : [];
+    return [state, `notify: ${mode}${found && snoozed(cwd, found.latest, today()) ? ' · snoozed' : ''}`, ...(how.length ? ['to update, run:', ...how, 'then restart Claude Code (a new process, not /clear)'] : [])].join('\n');
   },
 
   _push(cwd, [pm]) {

@@ -37,18 +37,26 @@ export const runningPlugin = () => readPlugin(PLUGIN_ROOT);
 
 // Source 1: what Claude Code has already fetched. A marketplace holding the plugin at its root
 // is our own layout; a plugin nested deeper in someone else's marketplace is simply not found.
-export function marketplaceVersion(name, home = claudeHome()) {
+export function marketplaceEntry(name, home = claudeHome()) {
   let known;
   try {
     known = JSON.parse(fs.readFileSync(path.join(home, 'plugins', 'known_marketplaces.json'), 'utf8'));
   } catch {
     return null;
   }
-  for (const entry of Object.values(known ?? {})) {
+  for (const [key, entry] of Object.entries(known ?? {})) {
     const plugin = entry?.installLocation ? readPlugin(entry.installLocation) : null;
-    if (plugin?.name === name) return plugin.version ?? null;
+    if (plugin?.name === name) return { key, version: plugin.version ?? null };
   }
   return null;
+}
+
+// The two commands that install the update, with this machine's own marketplace key.
+// Claude runs these; a person can also type them as /plugin … inside Claude Code.
+export function updateCommands(plugin = runningPlugin(), home = claudeHome()) {
+  const entry = plugin?.name ? marketplaceEntry(plugin.name, home) : null;
+  if (!entry) return [];
+  return [`claude plugin marketplace update ${entry.key}`, `claude plugin update ${plugin.name}@${entry.key}`];
 }
 
 // Source 2, GitHub only: the plugin.json of the default branch. Any other forge gets no network check.
@@ -91,7 +99,7 @@ export function updateAvailable({ pm, cwd, now = Date.now(), plugin = runningPlu
   const cached = readState(pm, STATE);
   if (networkCheckEnabled(cwd) && now - (cached.checkedAt ?? 0) > DAY_MS) refreshInBackground(pm);
   const found = [
-    { latest: marketplaceVersion(plugin.name), source: 'marketplace' },
+    { latest: marketplaceEntry(plugin.name)?.version, source: 'marketplace' },
     { latest: cached.version, source: 'release' },
   ].filter((c) => isNewer(c.latest, plugin.version));
   if (!found.length) return null;
