@@ -5,6 +5,7 @@ import path from 'node:path';
 import { setup, sh, cli } from './helpers.mjs';
 
 function commit(cwd, name, message = name, content = `${name}\n`) {
+  fs.mkdirSync(path.dirname(path.join(cwd, name)), { recursive: true });
   fs.writeFileSync(path.join(cwd, name), content);
   sh(['add', '-A'], cwd);
   sh(['commit', '-q', '-m', message], cwd);
@@ -121,6 +122,42 @@ test('undo, squash-merged MR: plain revert of the squash; a one-parent SHA of a 
   assert.match(undoOf(root, 'T-001', opts)[0], /\(one-parent merge of a 2-commit PR: a squash is reverted whole, a rebase merge only in its last commit — check first\)$/);
   run(root, undo[0]);
   assert.deepEqual(files(root), ['README.md']);
+});
+
+test('undo does not depend on the stored order, the cwd or the file names; an unknown PR commit count warns', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'order'], root);
+  cli(['task', 'new', '--title', 'pr'], root);
+  const init = head(root);
+  cli(['claim', 'T-001'], root);
+  const older = commit(root, 'док/отчёт.txt'); // non-ASCII: quoted and escaped by git unless core.quotePath=false
+  const newer = commit(root, 'b.txt');
+  cli(['set', 'T-001', 'status=done'], root);
+  cli(['set', 'T-001', `commits=${newer},${older}`], root); // stored in the wrong order on purpose
+  cli(['claim', 'T-002'], root);
+  const later = commit(root, 'док/отчёт.txt', 'edit report', 'edited\n');
+  cli(['set', 'T-002', 'status=done'], root);
+  const sub = path.join(root, 'док');
+  for (const cwd of [root, sub]) {
+    assert.deepEqual(undoOf(cwd, 'T-001'), [
+      `revert: git revert --no-edit ${newer} ${older}   (the task's commits, newest first)`,
+      `before: git switch -c before/T-001 ${init}   (the state before the task)`,
+      `risk:   same files changed later: ${later} (T-002)`,
+    ], `from ${cwd === root ? 'the root' : 'a subdirectory'}`);
+  }
+
+  sh(['switch', '-q', '-c', 'feat'], root);
+  commit(root, 'c.txt');
+  sh(['switch', '-q', 'main'], root);
+  sh(['merge', '-q', '--squash', 'feat'], root);
+  sh(['commit', '-q', '-m', 'Squash PR'], root);
+  const oneParent = sh(['rev-parse', 'HEAD'], root);
+  cli(['set', 'T-002', 'pr=https://github.com/o/r/pull/11'], root);
+  const opts = forge(root, { // a PR found by number, but the payload carries no commit count
+    'repos/o/r/pulls/11': { html_url: 'https://github.com/o/r/pull/11', state: 'closed', merged_at: '2026-09-16T10:00:00Z', merge_commit_sha: oneParent, user: { login: 'a' } },
+  });
+  assert.match(undoOf(root, 'T-002', opts)[0], /\(one-parent merge of the MR\/PR: a squash is reverted whole/);
 });
 
 test('undo notes: code not in this branch, merged commit not fetched, rewritten commits, a partial revert; nothing to undo prints no block', () => {
