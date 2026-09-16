@@ -20,6 +20,9 @@ export function tryGit(args, cwd, opts = {}) {
   }
 }
 
+// Case-insensitive only where the filesystem is.
+export const normPath = (p) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
+
 export function claudeHome() {
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }

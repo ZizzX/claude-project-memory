@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tryGit, pmDir, worktreeName, today } from './paths.mjs';
+import { tryGit, pmDir, worktreeName, today, normPath } from './paths.mjs';
 import { hasBoard, commitPm, isSyncOn, persist, readState, writeState, manualMtime } from './store.mjs';
 import { captureCommits } from './gitlink.mjs';
 import { listTasks, appendLogLine, validate } from './tasks.mjs';
@@ -22,8 +22,7 @@ export const PLAN_PATTERNS = [
 const PM_SCRIPT = fileURLToPath(new URL('../pm.mjs', import.meta.url));
 const HINT = '[pm] this repo has a shared board (branch pm) — say "connect the board" to use it';
 
-const norm = (p) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
-const inside = (file, dir) => norm(file).startsWith(norm(dir) + path.sep);
+const inside = (file, dir) => normPath(file).startsWith(normPath(dir) + path.sep);
 
 function dirtyFilesSince(cwd, since) {
   const top = tryGit(['rev-parse', '--show-toplevel'], cwd);

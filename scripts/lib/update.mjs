@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { claudeHome, git, tryGit } from './paths.mjs';
+import { claudeHome, git, tryGit, normPath } from './paths.mjs';
 import { readState, writeState } from './store.mjs';
 
 const PM_SCRIPT = fileURLToPath(new URL('../pm.mjs', import.meta.url));
@@ -51,12 +51,30 @@ export function marketplaceEntry(name, home = claudeHome()) {
   return null;
 }
 
+// Scope of the installation that is actually running. `claude plugin update` defaults to
+// `user`, so a project-, local- or managed-scope install would be missed without it.
+export function installedScope(name, key, home = claudeHome(), root = PLUGIN_ROOT) {
+  let installed;
+  try {
+    installed = JSON.parse(fs.readFileSync(path.join(home, 'plugins', 'installed_plugins.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const entries = installed?.plugins?.[`${name}@${key}`];
+  if (!Array.isArray(entries) || !entries.length) return null;
+  return (entries.find((e) => e?.installPath && normPath(e.installPath) === normPath(root)) ?? entries[0])?.scope ?? null;
+}
+
 // The two commands that install the update, with this machine's own marketplace key.
 // Claude runs these; a person can also type them as /plugin … inside Claude Code.
 export function updateCommands(plugin = runningPlugin(), home = claudeHome()) {
   const entry = plugin?.name ? marketplaceEntry(plugin.name, home) : null;
   if (!entry) return [];
-  return [`claude plugin marketplace update ${entry.key}`, `claude plugin update ${plugin.name}@${entry.key}`];
+  const scope = installedScope(plugin.name, entry.key, home);
+  return [
+    `claude plugin marketplace update ${entry.key}`,
+    `claude plugin update ${plugin.name}@${entry.key}${scope ? ` --scope ${scope}` : ''}`,
+  ];
 }
 
 // Source 2, GitHub only: the plugin.json of the default branch. Any other forge gets no network check.

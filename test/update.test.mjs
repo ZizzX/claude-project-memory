@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { setup, tmp, cli } from './helpers.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
-import { isNewer, readPlugin, marketplaceEntry, updateCommands, rawUrl, fetchLatest, refreshLatest, updateAvailable, networkCheckEnabled, updateLine, notifyMode, setMode, snooze, snoozed } from '../scripts/lib/update.mjs';
+import { isNewer, readPlugin, marketplaceEntry, updateCommands, installedScope, rawUrl, fetchLatest, refreshLatest, updateAvailable, networkCheckEnabled, updateLine, notifyMode, setMode, snooze, snoozed } from '../scripts/lib/update.mjs';
 
 const PLUGIN = { name: 'project-memory', version: '0.3.0', repository: 'https://github.com/ZizzX/claude-project-memory' };
 const URL_0_3_1 = 'https://raw.githubusercontent.com/ZizzX/claude-project-memory/HEAD/.claude-plugin/plugin.json';
@@ -208,6 +208,28 @@ test('updateCommands names this machine\'s marketplace key, or nothing when the 
     'claude plugin marketplace update my-tools',
     'claude plugin update project-memory@my-tools',
   ]);
+});
+
+// claude plugin update defaults to --scope user, so an install in another scope needs it spelled out.
+test('updateCommands passes the scope of the installation that is running', () => {
+  const home = tmp('pm-home-');
+  const running = tmp('pm-cache-');
+  marketplaces(home, { 'my-tools': { installLocation: pluginDir('0.3.1') } });
+  assert.equal(installedScope('project-memory', 'my-tools', home, running), null); // no file yet
+  fs.writeFileSync(path.join(home, 'plugins', 'installed_plugins.json'), JSON.stringify({
+    version: 1,
+    plugins: {
+      'project-memory@my-tools': [
+        { scope: 'user', installPath: path.join(tmp(), 'elsewhere') },
+        { scope: 'project', installPath: running },
+      ],
+      'other@my-tools': [{ scope: 'local', installPath: running }],
+    },
+  }));
+  assert.equal(installedScope('project-memory', 'my-tools', home, running), 'project');
+  assert.equal(installedScope('project-memory', 'my-tools', home, tmp()), 'user'); // no path match: the first entry
+  assert.equal(installedScope('not-installed', 'my-tools', home, running), null);
+  assert.match(updateCommands(PLUGIN, home)[1], /--scope user$/);
 });
 
 test('pm update prints the two commands when there is something to install', () => {
