@@ -10,6 +10,9 @@ const NET = { timeout: 60_000 };
 // so any index.lock older than this cannot belong to a live pm process.
 const STALE_LOCK_MS = 5 * 60_000;
 const conflictPath = (pm) => path.join(pm, '.state', 'conflict');
+// A symlink committed to the shared board would make pm (and the agent) write through it to any file
+// on this machine; with core.symlinks=false git checks it out as a plain text file instead.
+const NO_SYMLINKS = ['-c', 'core.symlinks=false'];
 
 export const syncTarget = (cwd, remote) => remote || tryGit(['remote', 'get-url', 'origin'], cwd);
 
@@ -47,13 +50,14 @@ export function syncOn(cwd, url) {
   const remoteHasBoard = Boolean(git(['ls-remote', '--heads', url, 'pm'], cwd, NET));
   if (!hasBoard(cwd) && remoteHasBoard) {
     fs.mkdirSync(path.dirname(pm), { recursive: true });
-    git(['clone', '-q', '--single-branch', '--branch', 'pm', url, pm], path.dirname(pm), NET);
+    git(['clone', '-q', ...NO_SYMLINKS, '--single-branch', '--branch', 'pm', url, pm], path.dirname(pm), NET);
     writeBoard(pm);
     return { pm, mode: 'cloned', conflict: false };
   }
   if (!hasBoard(cwd)) initBoard(cwd, today());
   tryGit(['remote', 'remove', 'origin'], pm);
   git(['remote', 'add', 'origin', url], pm);
+  git(['config', '--replace-all', 'core.symlinks', 'false'], pm);
   if (remoteHasBoard) {
     git(['fetch', '-q', 'origin', 'pm'], pm, NET);
     try {
@@ -76,6 +80,9 @@ export function syncOff(pm) {
 
 export function pull(pm, timeout = 5000) {
   try {
+    // Written to the config, not passed as -c: a conflict ends in a manual `git rebase --continue`,
+    // and boards connected before this setting existed get it on their next pull.
+    git(['config', '--replace-all', 'core.symlinks', 'false'], pm); // clone -c on Git for Windows leaves two values
     git([...identityArgs(pm), 'pull', '-q', '--rebase', '--autostash', 'origin', 'pm'], pm, { timeout });
     fs.rmSync(conflictPath(pm), { force: true });
     return 'ok';

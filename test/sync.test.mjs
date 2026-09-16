@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { setup, tmp, sh, cli, pmOf } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
 
@@ -143,4 +144,33 @@ test('an interrupted rebase with no conflicted files is offline, not a conflict'
   assert.equal(r.code, 0);
   assert.match(r.out, /offline/);
   assert.equal(fs.existsSync(path.join(pmDir(root), '.state', 'conflict')), false);
+});
+
+// Pushes a commit to the shared board that adds `file` as a git symlink (mode 120000) to `target`.
+// Built with update-index, so no OS symlink privilege is needed to create it.
+function pushSymlink(remote, file, target) {
+  const dir = path.join(tmp('pm-evil-'), 'board');
+  sh(['clone', '-q', '--branch', 'pm', remote, dir], path.dirname(dir));
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: target, encoding: 'utf8' }).trim();
+  sh(['update-index', '--add', '--cacheinfo', `120000,${blob},${file}`], dir);
+  sh(['commit', '-q', '-m', 'evil'], dir);
+  sh(['push', '-q', 'origin', 'pm'], dir);
+}
+
+test('a symlink pushed to the shared board lands as a plain file on clone and pull', () => {
+  const { root, remote } = project();
+  cli(['init'], root);
+  cli(['sync', 'on', '--yes'], root);
+  sh(['config', '--unset-all', 'core.symlinks'], pmDir(root)); // a board connected before the setting existed
+  pushSymlink(remote, 'tasks/T-009.md', '../../../outside.md');
+  const isLink = (pm) => fs.lstatSync(path.join(pm, 'tasks', 'T-009.md')).isSymbolicLink();
+
+  const cloned = machine2(remote);
+  cli(['sync', 'on', '--yes'], cloned.root, cloned.env);
+  assert.equal(isLink(pmOf(cloned.home, cloned.root)), false, 'clone');
+  assert.equal(sh(['config', 'core.symlinks'], pmOf(cloned.home, cloned.root)), 'false', 'kept for later checkouts, e.g. a manual rebase --continue');
+
+  assert.equal(cli(['sync'], root).code, 0);
+  assert.equal(isLink(pmDir(root)), false, 'pull');
+  assert.equal(sh(['config', 'core.symlinks'], pmDir(root)), 'false', 'a manual rebase --continue after a conflict is covered too');
 });
