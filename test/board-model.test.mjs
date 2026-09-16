@@ -1,0 +1,100 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { tmp } from './helpers.mjs';
+import { newTask, setFields, claim, appendLog, appendLogLine, readTask, writeTask } from '../scripts/lib/tasks.mjs';
+import { planFile, planTemplate } from '../scripts/lib/plan.mjs';
+import { appendDecision, decisionsFile } from '../scripts/lib/decisions.mjs';
+import { loadBoardSnapshot, buildBoardModel, writeBoard } from '../scripts/lib/board.mjs';
+
+const D = '2026-09-16';
+
+function board() {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D).replace('## Current focus\n', '## Current focus\n- A: ship A\n'));
+  fs.writeFileSync(decisionsFile(pm), '# Decisions\n');
+  newTask(pm, { title: 'a-done', epic: 'A', date: D });
+  setFields(pm, 'T-001', { status: 'done' }, D);
+  newTask(pm, { title: 'a-work', epic: 'A', deps: ['T-001', 'T-004'], date: D });
+  newTask(pm, { title: 'plain', date: D });
+  newTask(pm, { title: 'b-closed', epic: 'B', date: D });
+  setFields(pm, 'T-004', { status: 'done' }, '2026-09-15');
+  claim(pm, 'T-002', 'wt', D, 'feat/T-002/x');
+  setFields(pm, 'T-002', { pr: 'https://example.com/pr/1' }, D);
+  const t = readTask(pm, 'T-002');
+  t.body = '## Goal\ngoal text\n\n## Understanding\nline 1\nline 2\n\n## Checklist\n- [ ] one\n\n## Log\n';
+  writeTask(t);
+  for (const n of [1, 2, 3, 4]) appendLog(pm, 'T-002', { worktree: 'wt', did: `d${n}`, next: `n${n}`, date: D });
+  newTask(pm, { title: 'b-dropped', epic: 'B', date: D });
+  setFields(pm, 'T-005', { status: 'dropped' }, D);
+  appendDecision(pm, { title: 'first', why: 'w', rejected: 'r', tasks: ['T-002'], date: D });
+  appendDecision(pm, { title: 'second', why: 'w', rejected: 'r', tasks: ['T-003', 'T-002'], date: D });
+  return pm;
+}
+
+test('model: columns, archive, epics, focus and decisions from one snapshot', () => {
+  const m = buildBoardModel(loadBoardSnapshot(board()));
+  assert.equal(m.name, 'demo');
+  assert.equal(m.hasEpics, true);
+  assert.deepEqual(m.focus, ['A: ship A']);
+  assert.deepEqual(Object.fromEntries(m.columns.map((c) => [c.key, c.cards.map((x) => x.id)])), {
+    todo: [], ready: ['T-003'], in_progress: ['T-002'], waiting: [], done: ['T-001'],
+  });
+  assert.deepEqual(m.archive, [{ epic: 'B', done: 1, updated: '2026-09-15' }]);
+  assert.deepEqual(m.epics, [{ key: 'A', open: 1, total: 2 }, { key: 'B', open: 0, total: 1 }], 'dropped tasks are not counted, as in pm epics');
+  assert.deepEqual(m.decisions.map((d) => [d.id, d.tasks]), [['D-002', ['T-003', 'T-002']], ['D-001', ['T-002']]], 'newest first');
+  assert.doesNotMatch(JSON.stringify(m), /<\w/, 'no markup in the model');
+});
+
+test('model card: details, deps with status, last log entries, decisions', () => {
+  const m = buildBoardModel(loadBoardSnapshot(board()));
+  const c = m.columns.find((x) => x.key === 'in_progress').cards[0];
+  assert.deepEqual(c.deps, [{ id: 'T-001', status: 'done', onBoard: true }, { id: 'T-004', status: 'done', onBoard: false }]);
+  assert.equal(c.goal, 'goal text');
+  assert.equal(c.understanding, 'line 1\nline 2');
+  assert.equal(c.checklist, '- [ ] one');
+  assert.equal(c.log.length, 3);
+  assert.match(c.log[2], /did: d4 · next: n4$/);
+  assert.equal(c.next, 'n4');
+  assert.equal(c.branch, 'feat/T-002/x');
+  assert.equal(c.pr, 'https://example.com/pr/1');
+  assert.deepEqual(c.worktrees, ['wt']);
+  assert.deepEqual(c.decisions, ['D-001', 'D-002']);
+  const done = m.columns.find((x) => x.key === 'done').cards[0];
+  assert.deepEqual([done.next, done.goal, done.log, done.decisions, done.pr], ['', '', [], [], '']);
+});
+
+test('model: a task body without sections and an empty board', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  const empty = buildBoardModel(loadBoardSnapshot(pm));
+  assert.deepEqual([empty.hasEpics, empty.focus, empty.archive, empty.epics, empty.decisions], [false, [], [], [], []]);
+  assert.ok(empty.columns.every((c) => c.cards.length === 0));
+  newTask(pm, { title: 'bare', date: D });
+  const t = readTask(pm, 'T-001');
+  t.body = 'free text\n';
+  writeTask(t);
+  appendLogLine(pm, 'T-001', '- note', D);
+  const c = buildBoardModel(loadBoardSnapshot(pm)).columns.find((x) => x.key === 'ready').cards[0];
+  assert.deepEqual([c.goal, c.log], ['', []]);
+});
+
+test('writeBoard replaces the views atomically and leaves no temp file', () => {
+  const pm = board();
+  writeBoard(pm);
+  writeBoard(pm);
+  assert.deepEqual(fs.readdirSync(pm).filter((f) => f.endsWith('.tmp')), []);
+  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<\/html>\n$/);
+});
+
+test('writeBoard falls back to a plain write when the rename is refused', (t) => {
+  const pm = board();
+  writeBoard(pm);
+  t.mock.method(fs, 'renameSync', () => {
+    throw Object.assign(new Error('busy'), { code: 'EPERM' });
+  });
+  fs.writeFileSync(`${pm}/board.html`, 'stale');
+  writeBoard(pm);
+  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<\/html>\n$/);
+  assert.deepEqual(fs.readdirSync(pm).filter((f) => f.endsWith('.tmp')), []);
+});
