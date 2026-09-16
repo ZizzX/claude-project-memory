@@ -90,8 +90,20 @@ project-memory держит одну небольшую доску на репо
 node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
 ```
 
-Удобный алиас: `alias pm='node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs'`.
-Запускайте его из папки проекта. Точный путь к CLI печатается и в сводке сессии.
+### `pm` в обычном терминале
+
+CLI не требует Claude Code. Скажите в сессии **«добавь алиас pm»** или один раз запустите:
+
+```
+node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs alias
+```
+
+(Плагин поставлен из локальной папки? Путь возьмите из строки `CLI:` в сводке сессии.)
+
+Команда добавляет `pm` во все профили PowerShell и в Git Bash на Windows, в `~/.zshrc` или `~/.bash_profile` на macOS,
+в `~/.zshrc` или `~/.bashrc` на Linux и печатает, какие файлы изменила. Повторный запуск безопасен, а `pm`, заданный
+вами вручную, она не трогает. Откройте новый терминал: `pm board` печатает путь к `board.html`, `pm help` — всё остальное.
+Если PowerShell не загружает профиль, разрешите это один раз: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 ## Что говорить
 
@@ -106,6 +118,7 @@ node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
 | «отмени правку доски», «откати» | Отменяет это изменение самой доски через git |
 | «откати код T-007», «удали изменения T-007» | Показывает блок `undo:` из `pm show T-007` вместе с рисками, ждёт вашего «да» и откатывает коммиты задачи в новой задаче отката, в ветке `revert/T-007` |
 | «вернись к состоянию до T-007» | Сначала предлагает `git switch -c before/T-007 <base>` — ничего не теряется; разрушающие варианты только если вы их попросите |
+| «добавь алиас pm» | `pm alias`: `pm` работает в любом терминале, не только в Claude Code |
 | «включи синхронизацию доски», «подключи доску» | Показывает, куда будет отправлена доска, и ждёт вашего «да» |
 | «обнови плагин», «позже», «не напоминай», «сам обновлю» | Ответ на строку `[pm] update available`: поставить новую версию, отложить на 7 дней, замолчать навсегда или просто показать команды |
 | «обновляй сам, не спрашивай» | `pm.updateNotify=auto` — дальше Claude ставит новые версии без вопроса и сообщает, что поставил |
@@ -119,7 +132,7 @@ node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
 
 Английские фразы тоже работают: "what's next?", "take the next one", "break it down", "remember …",
 "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that",
-"undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board",
+"undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "add the pm alias",
 "update the plugin", "later", "never", "update it yourself".
 
 Каждый ход, в котором менялась доска, заканчивается одной строкой на вашем языке, например
@@ -221,6 +234,7 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 | `pm scan` | Показать файлы планов в `docs/superpowers/plans`, `docs/superpowers/specs`, `docs/designs`, `.dev-cycle/tasks` и ceo-plans gstack с прогрессом по чекбоксам |
 | `pm sync on [--remote url] [--yes]` · `pm sync off` · `pm sync` | Синхронизация между машинами, только по желанию |
 | `pm update [later \| never \| auto \| ask]` | Уведомление об обновлении: текущая и доступная версия, две команды для установки и как вести себя дальше |
+| `pm alias` | Добавить алиас `pm` в профили оболочек (PowerShell, bash, zsh) |
 | `pm help` | Всё перечисленное плюс фразы. `--help` после любой команды показывает то же |
 
 Статусы: `todo`, `in_progress`, `waiting` (нужен `waiting_on`), `done`, `dropped`.

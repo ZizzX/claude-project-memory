@@ -89,8 +89,20 @@ To see every command and phrase at once:
 node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs help
 ```
 
-Handy alias: `alias pm='node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs'`.
-Run it from inside the project. The session summary also prints the exact CLI path it uses.
+### `pm` in an ordinary terminal
+
+The CLI does not need Claude Code. Say **"add the pm alias"** in a session, or run once:
+
+```
+node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs alias
+```
+
+(Installed from a local folder? Take the path from the `CLI:` line of the session summary.)
+
+It adds `pm` to every PowerShell profile and to Git Bash on Windows, to `~/.zshrc` or `~/.bash_profile` on macOS,
+to `~/.zshrc` or `~/.bashrc` on Linux, and prints the files it touched. Running it again is safe, and a `pm` you
+defined yourself is left alone. Open a new terminal: `pm board` prints the path to `board.html`, `pm help` lists the rest.
+If PowerShell refuses to load the profile, allow it once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 ## What to say
 
@@ -105,6 +117,7 @@ Run it from inside the project. The session summary also prints the exact CLI pa
 | "undo that", "undo the board change" | Reverts that change of the board itself with git |
 | "undo the code of T-007", "remove the changes of T-007" | Shows the `undo:` block of `pm show T-007` with its risks, waits for your yes, then reverts the task's commits in a new undo task on a `revert/T-007` branch |
 | "go back to the state before T-007" | Offers `git switch -c before/T-007 <base>` first — nothing is lost; the destructive ways only if you ask for them |
+| "add the pm alias" | `pm alias`: `pm` works in any terminal, not only in Claude Code |
 | "enable board sync", "connect the board" | Shows where the board would be pushed and waits for your yes |
 | "update the plugin", "later", "never", "I'll do it myself" | Answers the `[pm] update available` line: installs the new version, snoozes it for 7 days, silences it, or just shows you the commands |
 | "update it yourself, do not ask" | `pm.updateNotify=auto` — from then on Claude installs new versions without asking and reports what landed |
@@ -118,7 +131,7 @@ merge SHA and author, and the undo block targets the merge commit instead of the
 
 Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили»,
 «продолжим в новой сессии», «план меняется», «ждём», «отмени правку доски», «откати код T-007»,
-«вернись к состоянию до T-007», «включи синхронизацию доски», «подключи доску», «обнови плагин»,
+«вернись к состоянию до T-007», «включи синхронизацию доски», «подключи доску», «добавь алиас pm», «обнови плагин»,
 «позже», «не напоминай», «обновляй сам».
 
 Every turn that changed the board ends with one line in your language, such as
@@ -219,6 +232,7 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 | `pm scan` | List plan files in `docs/superpowers/plans`, `docs/superpowers/specs`, `docs/designs`, `.dev-cycle/tasks` and gstack ceo-plans, with checkbox progress |
 | `pm sync on [--remote url] [--yes]` · `pm sync off` · `pm sync` | Opt-in sync across machines |
 | `pm update [later \| never \| auto \| ask]` | The update notice: current and available version, the two commands to install it, and how it behaves from now on |
+| `pm alias` | Add the `pm` alias to your shell profiles (PowerShell, bash, zsh) |
 | `pm help` | All of the above, plus the phrases. `--help` after any command shows the same |
 
 Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `done`, `dropped`.

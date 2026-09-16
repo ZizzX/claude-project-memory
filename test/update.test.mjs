@@ -54,12 +54,13 @@ test('readPlugin: a plugin.json next to the given root, or null', () => {
 test('marketplaceEntry finds the plugin by name and survives a missing or broken file', () => {
   const home = tmp('pm-home-');
   assert.equal(marketplaceEntry('project-memory', home), null);
+  const dir = pluginDir('0.3.1');
   marketplaces(home, {
     other: { installLocation: pluginDir('9.9.9', 'something-else') },
-    'project-memory': { installLocation: pluginDir('0.3.1') },
+    'project-memory': { installLocation: dir },
     gone: { installLocation: path.join(home, 'nowhere') },
   });
-  assert.deepEqual(marketplaceEntry('project-memory', home), { key: 'project-memory', version: '0.3.1' });
+  assert.deepEqual(marketplaceEntry('project-memory', home), { key: 'project-memory', version: '0.3.1', dir });
   assert.equal(marketplaceEntry('not-installed', home), null);
   fs.writeFileSync(path.join(home, 'plugins', 'known_marketplaces.json'), '{broken');
   assert.equal(marketplaceEntry('project-memory', home), null);

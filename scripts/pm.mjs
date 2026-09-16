@@ -14,6 +14,7 @@ import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
 import { buildSummary } from './lib/summary.mjs';
 import { scanPlans } from './lib/scan.mjs';
+import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
 import { refreshLatest, updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
@@ -33,6 +34,7 @@ const USAGE = `usage: pm <command>
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
+  alias                                        add the pm alias to your shell profiles (PowerShell, bash, zsh)
   help                                         this list, plus what to say to Claude in a session
   hook <event>                                 hook entry point (used by the plugin)`;
 
@@ -46,6 +48,7 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "undo that" / "undo the board change"        revert that change of the board itself
   "undo the code of T-007"                     show the undo block, ask, then revert the task's commits
   "go back to the state before T-007"          offer the safe branch first, the dangerous ways only on request
+  "add the pm alias"                           pm alias: run pm commands from any terminal
   "enable board sync" / "connect the board"    opt-in sync across machines (asks before pushing)
   "update the plugin" / "later" / "never"      after a [pm] update available line: install it, snooze it 7 days, or stop asking
   "update it yourself, do not ask"             pm.updateNotify=auto — Claude installs new versions and reports them
@@ -293,6 +296,11 @@ Re-run with --yes to proceed.`;
       if (process.env.PM_DEBUG) console.error(e);
       return '';
     }
+  },
+
+  // No board needed: the alias is per machine, not per repo.
+  alias() {
+    return installAliases();
   },
 
   help() {

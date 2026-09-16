@@ -46,7 +46,7 @@ export function marketplaceEntry(name, home = claudeHome()) {
   }
   for (const [key, entry] of Object.entries(known ?? {})) {
     const plugin = entry?.installLocation ? readPlugin(entry.installLocation) : null;
-    if (plugin?.name === name) return { key, version: plugin.version ?? null };
+    if (plugin?.name === name) return { key, version: plugin.version ?? null, dir: entry.installLocation };
   }
   return null;
 }
