@@ -227,9 +227,26 @@ test('updateCommands passes the scope of the installation that is running', () =
     },
   }));
   assert.equal(installedScope('project-memory', 'my-tools', home, running), 'project');
-  assert.equal(installedScope('project-memory', 'my-tools', home, tmp()), 'user'); // no path match: the first entry
+  assert.equal(installedScope('project-memory', 'my-tools', home, tmp()), null); // several installs, none is this one
   assert.equal(installedScope('not-installed', 'my-tools', home, running), null);
-  assert.match(updateCommands(PLUGIN, home)[1], /--scope user$/);
+  assert.equal(updateCommands(PLUGIN, home)[1], 'claude plugin update project-memory@my-tools'); // the running copy is neither entry
+});
+
+test('an ambiguous install says nothing, so the command keeps its default scope', () => {
+  const home = tmp('pm-home-');
+  const running = tmp('pm-cache-');
+  marketplaces(home, { 'my-tools': { installLocation: pluginDir('0.3.1') } });
+  fs.writeFileSync(path.join(home, 'plugins', 'installed_plugins.json'), JSON.stringify({
+    version: 1,
+    plugins: {
+      'project-memory@my-tools': [
+        { scope: 'project', installPath: running }, // another project's install, same cache directory
+        { scope: 'user', installPath: running },
+      ],
+    },
+  }));
+  assert.equal(installedScope('project-memory', 'my-tools', home, running), null);
+  assert.equal(updateCommands(PLUGIN, home)[1], 'claude plugin update project-memory@my-tools');
 });
 
 test('pm update prints the two commands when there is something to install', () => {

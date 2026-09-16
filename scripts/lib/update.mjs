@@ -62,7 +62,12 @@ export function installedScope(name, key, home = claudeHome(), root = PLUGIN_ROO
   }
   const entries = installed?.plugins?.[`${name}@${key}`];
   if (!Array.isArray(entries) || !entries.length) return null;
-  return (entries.find((e) => e?.installPath && normPath(e.installPath) === normPath(root)) ?? entries[0])?.scope ?? null;
+  const here = entries.filter((e) => e?.installPath && normPath(e.installPath) === normPath(root));
+  // Entries carry no project path, so two scopes sharing one install directory are indistinguishable:
+  // name a scope only when it is unambiguous, else say nothing and let the command default to user.
+  if (here.length === 1) return here[0].scope ?? null;
+  if (here.length) return null;
+  return entries.length === 1 ? entries[0].scope ?? null : null;
 }
 
 // The two commands that install the update, with this machine's own marketplace key.
