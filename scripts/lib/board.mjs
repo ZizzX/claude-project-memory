@@ -133,8 +133,8 @@ export function buildBoardModel({ tasks, plan, decisions, today }) {
 
 // One line per Archive group: older done cards first, then every closed epic.
 const archiveGroups = (a) => [
-  ...(a.done.length ? [{ head: `Done earlier · ${a.done.length}`, cards: a.done }] : []),
-  ...a.epics.map((e) => ({ head: `${e.epic} · ${e.cards.length} done${e.updated ? ` · ${e.updated}` : ''}`, cards: e.cards })),
+  ...(a.done.length ? [{ key: '', head: `Done earlier · ${a.done.length}`, cards: a.done }] : []),
+  ...a.epics.map((e) => ({ key: e.epic, head: `${e.epic} · ${e.cards.length} done${e.updated ? ` · ${e.updated}` : ''}`, cards: e.cards })),
 ];
 const after = (c) => c.deps.map((d) => d.id).join(', ');
 
@@ -206,28 +206,35 @@ function lanes(model, cols) {
   }).join('')}</div>`;
 }
 
+const REFRESH_S = 10;
+
 const SCRIPT = `(() => {
+  // First, so an exception below never stops the refresh. meta refresh drops the hash; reload() keeps it.
+  setTimeout(() => location.reload(), ${REFRESH_S * 1000});
   const btn = document.getElementById('group');
   const board = document.getElementById('board');
   const lanes = document.getElementById('lanes');
-  const cards = [...board.querySelectorAll('.card')];
-  const home = (c) => board.querySelector('.col[data-col="' + c.dataset.col + '"] .cards');
-  const apply = (byEpic) => {
-    for (const c of cards) {
-      const lane = byEpic && [...lanes.children].find((l) => l.dataset.epic === c.dataset.epic);
-      (lane ? lane.querySelector('.col[data-col="' + c.dataset.col + '"] .cards') : home(c)).append(c);
-    }
-    for (const n of lanes.querySelectorAll('.n')) n.textContent = n.closest('.col').querySelectorAll('.card').length;
-    board.hidden = byEpic;
-    lanes.hidden = !byEpic;
-    btn.setAttribute('aria-pressed', String(byEpic));
-  };
-  btn.hidden = false;
-  btn.addEventListener('click', () => {
-    const byEpic = btn.getAttribute('aria-pressed') !== 'true';
-    history.replaceState(null, '', byEpic ? '#group=epic' : location.pathname + location.search);
-    apply(byEpic);
-  });
+  if (btn && board && lanes) {
+    const cards = [...board.querySelectorAll('.card')];
+    const home = (c) => board.querySelector('.col[data-col="' + c.dataset.col + '"] .cards');
+    const apply = (byEpic) => {
+      for (const c of cards) {
+        const lane = byEpic && [...lanes.children].find((l) => l.dataset.epic === c.dataset.epic);
+        (lane ? lane.querySelector('.col[data-col="' + c.dataset.col + '"] .cards') : home(c)).append(c);
+      }
+      for (const n of lanes.querySelectorAll('.n')) n.textContent = n.closest('.col').querySelectorAll('.card').length;
+      board.hidden = byEpic;
+      lanes.hidden = !byEpic;
+      btn.setAttribute('aria-pressed', String(byEpic));
+    };
+    btn.hidden = false;
+    btn.addEventListener('click', () => {
+      const byEpic = btn.getAttribute('aria-pressed') !== 'true';
+      history.replaceState(null, '', byEpic ? '#group=epic' : location.pathname + location.search);
+      apply(byEpic);
+    });
+    apply(location.hash === '#group=epic');
+  }
   // A dependency link opens its card instead of dropping the grouping kept in the hash.
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[href^="#"]');
@@ -239,9 +246,28 @@ const SCRIPT = `(() => {
     to.scrollIntoView({ block: 'center' });
     to.querySelector('summary').focus();
   });
-  apply(location.hash === '#group=epic');
-  // meta refresh drops the hash; reload() keeps it (T-041 also keeps open cards and pauses while typing).
-  setTimeout(() => location.reload(), 10000);
+  // A reload keeps every <details> open or closed and the scroll position, per tab. The key survives regeneration:
+  // a card by its id, a column by its lane (or the plain board) and status, an archive group by its epic.
+  const store = 'pm-board:' + location.pathname;
+  const key = (d) => {
+    const lane = d.closest('.lane');
+    return d.id || [lane ? 'lane:' + lane.dataset.epic : 'board', d.className, d.dataset.col, d.dataset.key].join('|');
+  };
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(store));
+    if (saved) {
+      for (const d of document.querySelectorAll('details')) {
+        const k = key(d);
+        if (k in saved.open) d.open = saved.open[k];
+      }
+      scrollTo(0, saved.y);
+    }
+  } catch {}
+  addEventListener('pagehide', () => {
+    const open = {};
+    for (const d of document.querySelectorAll('details')) open[key(d)] = d.open;
+    try { sessionStorage.setItem(store, JSON.stringify({ open, y: scrollY })); } catch {}
+  });
 })();`;
 
 export function renderBoardHtml(model, generated = '') {
@@ -267,10 +293,9 @@ export function renderBoardHtml(model, generated = '') {
     ? (open ? '<p><button type="button" id="group" aria-pressed="false" hidden>Group by epic</button></p>' : '')
     : '<p class="empty">No epics: <code>pm task new --epic KEY</code> groups tasks by direction.</p>';
   const archive = groups.length
-    ? `<details class="archive"><summary>Archive · ${groups.reduce((n, g) => n + g.cards.length, 0)}</summary>${groups.map((g) => `<details class="group"><summary>${esc(g.head)}</summary><div class="cards">${
+    ? `<details class="archive"><summary>Archive · ${groups.reduce((n, g) => n + g.cards.length, 0)}</summary>${groups.map((g) => `<details class="group" data-key="${esc(g.key)}"><summary>${esc(g.head)}</summary><div class="cards">${
       g.cards.map((x) => card(x, 'archive', linked)).join('')}</div></details>`).join('')}</details>`
     : '';
-  const script = open && model.hasEpics;
   const recent = model.decisions.slice(0, DECISIONS_MAX);
   const ref = (id) => (linked.has(id) ? `<a href="#${esc(id)}">${esc(id)}</a>` : esc(id));
   const decisions = recent.length
@@ -278,7 +303,7 @@ export function renderBoardHtml(model, generated = '') {
       recent.map((d) => `<li><b>${esc(d.id)}</b> · ${esc(d.date)} · ${esc(d.title)}${d.tasks.length ? ` · ${d.tasks.map(ref).join(', ')}` : ''}</li>`).join('')}</ul></details>`
     : '<p class="empty">No decisions yet: <code>pm decision --title …</code></p>';
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8">${script ? '<noscript><meta http-equiv="refresh" content="10"></noscript>' : '<meta http-equiv="refresh" content="10">'}
+<html lang="en"><head><meta charset="utf-8"><noscript><meta http-equiv="refresh" content="${REFRESH_S}"></noscript>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${name} · board</title>
 <style>
@@ -310,7 +335,8 @@ button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 </style></head><body>
 <header><h1>${name}</h1>${generated ? `<p class="generated">generated ${esc(generated)}</p>` : ''}${focus}${epics}</header>
 ${board}${archive}${decisions}
-${script ? `<script>${SCRIPT}</script>\n` : ''}</body></html>
+<script>${SCRIPT}</script>
+</body></html>
 `;
 }
 

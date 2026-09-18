@@ -72,7 +72,7 @@ turn that off with `git config --global pm.updateCheckNetwork false`; the local 
 4. Work as usual. When you stop, say **"we're done"**: Claude logs what was done and the exact next step.
 5. `/clear` or come back tomorrow in any worktree. The session opens with the summary and carries on.
 
-Open `board.html` (the link is in the summary) for a kanban view that refreshes every 10 seconds.
+Open `board.html` (the link is in the summary) for a kanban view that refreshes every 10 seconds and keeps the cards you opened and the scroll position.
 
 ## Four ways it is used
 

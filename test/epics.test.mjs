@@ -190,7 +190,7 @@ test('board without epics: Done is neither capped nor aged, html has no archive 
   assert.match(md, /## Done \(7\)\n- \*\*T-001\*\* d0\n/);
   assert.doesNotMatch(md, /shown|Archive/);
   const html = fs.readFileSync(`${pm}/board.html`, 'utf8');
-  assert.doesNotMatch(html, /class="archive"|id="lanes"|<script>/);
+  assert.doesNotMatch(html, /class="archive"|id="lanes"/);
   assert.match(html, /<h2>Done · 7<\/h2>/);
 });
 
@@ -217,7 +217,7 @@ test('archive: a closed epic moves its done cards into the Archive, they still s
   assert.doesNotMatch(md, /\*\*T-001\*\*|\*\*T-003\*\*|\*\*T-005\*\*/, 'BOARD.md keeps one line per closed epic');
   assert.match(md, /## Done \(1\)\n- \*\*T-004\*\* plain-done\n/);
   const html = fs.readFileSync(`${pm}/board.html`, 'utf8');
-  assert.match(html, /<details class="archive"><summary>Archive · 2<\/summary><details class="group"><summary>A · 2 done · 2026-09-13<\/summary><div class="cards"><details class="card" id="T-001" data-epic="A" data-col="archive">/);
+  assert.match(html, /<details class="archive"><summary>Archive · 2<\/summary><details class="group" data-key="A"><summary>A · 2 done · 2026-09-13<\/summary><div class="cards"><details class="card" id="T-001" data-epic="A" data-col="archive">/);
   assert.match(html, /id="T-005"/);
   assert.doesNotMatch(html, /id="T-003"/, 'a dropped task stays hidden');
   // One reopened task brings the epic back to the columns; the done cards past the latest 5 go to the Archive.

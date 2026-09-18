@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import { tmp } from './helpers.mjs';
 import { newTask, setFields, claim, appendLog, appendLogLine, readTask, writeTask } from '../scripts/lib/tasks.mjs';
 import { planFile, planTemplate } from '../scripts/lib/plan.mjs';
@@ -146,7 +147,7 @@ test('model: Done keeps the last 5 closed within 20 days, older done cards go to
   assert.deepEqual(m.columns.find((c) => c.key === 'done').cards.map((c) => c.id), ['T-006', 'T-007', 'T-008', 'T-009', 'T-010'], 'the last 5 by order');
   assert.deepEqual(m.archive.done.map((c) => [c.id, c.updated]), [['T-005', D], ['T-004', '2026-08-28'], ['T-003', '2026-08-27'], ['T-002', '2026-08-01']], 'newest first');
   const h = renderBoardHtml(m);
-  assert.match(h, /<details class="archive"><summary>Archive · 4<\/summary><details class="group"><summary>Done earlier · 4<\/summary><div class="cards"><details class="card" id="T-005"/);
+  assert.match(h, /<details class="archive"><summary>Archive · 4<\/summary><details class="group" data-key=""><summary>Done earlier · 4<\/summary><div class="cards"><details class="card" id="T-005"/);
   assert.match(h, /<span>closed 2026-08-01<\/span>/, 'a done card shows its closing date');
   assert.equal(h.match(/id="T-002"/g).length, 1);
 });
@@ -187,7 +188,7 @@ test('html: empty states', () => {
   assert.match(h, /No focus set/);
   assert.match(h, /No epics:/);
   assert.match(h, /No decisions yet/);
-  assert.doesNotMatch(h, /<script>|id="group"/);
+  assert.doesNotMatch(h, /id="group"/);
   setFields(pm, newTask(pm, { title: 'x', date: D }).id, { status: 'dropped' }, D);
   assert.match(html(pm), /Every task is dropped\./);
   setFields(pm, newTask(pm, { title: 'y', epic: 'A', date: D }).id, { status: 'done' }, D);
@@ -198,12 +199,64 @@ test('html: empty states', () => {
   assert.match(html(pm), /<div class="cards"><\/div>/, 'an empty column is marked by css');
 });
 
-test('html: with the script the page reloads itself, keeping the hash; without it meta refresh stays', () => {
-  const h = html(board());
-  assert.match(h, /<noscript><meta http-equiv="refresh" content="10"><\/noscript>/);
-  assert.match(h, /location\.reload\(\)/);
+test('html: every board reloads itself keeping the hash and the open <details>; meta refresh only without JS', () => {
   const pm = tmp();
   fs.writeFileSync(planFile(pm), planTemplate('demo', D));
   newTask(pm, { title: 'plain', date: D });
-  assert.match(html(pm), /<head><meta charset="utf-8"><meta http-equiv="refresh" content="10">/);
+  for (const h of [html(board()), html(pm)]) {
+    assert.match(h, /<head><meta charset="utf-8"><noscript><meta http-equiv="refresh" content="10"><\/noscript>/);
+    assert.match(h, /location\.reload\(\)/);
+    assert.match(h, /sessionStorage/);
+  }
+});
+
+// The page script runs in node:vm against a DOM stub: just enough document, storage and timers for the refresh and persistence paths.
+const pageScript = (h) => h.match(/<script>([\s\S]*?)<\/script>/)[1];
+const node = (props, lane) => ({ id: '', className: '', dataset: {}, open: false, closest: (s) => (s === '.lane' ? lane ?? null : null), ...props });
+function runPage(src, { stored = null, details = [], storage } = {}) {
+  const calls = [];
+  const ctx = {
+    document: { getElementById: () => null, querySelectorAll: (s) => (s === 'details' ? details : []), addEventListener() {} },
+    location: { pathname: '/pm/board.html', hash: '', reload() {} },
+    sessionStorage: storage ?? { getItem: () => stored, setItem: (k, v) => calls.push(['set', k, JSON.parse(v)]) },
+    addEventListener: (ev, fn) => { if (ev === 'pagehide') ctx.pagehide = fn; },
+    setTimeout: (fn, ms) => calls.push(['timeout', ms]),
+    scrollTo: (x, y) => calls.push(['scroll', y]),
+    scrollY: 42,
+    history: {},
+  };
+  vm.runInNewContext(src, ctx);
+  return { calls, ctx };
+}
+
+test('page script: runs on an empty board and schedules the reload first', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  assert.deepEqual(runPage(pageScript(html(pm))).calls, [['timeout', 10000]]);
+});
+
+test('page script: restores and saves <details> by keys that keep the board and the No epic lane apart', () => {
+  const card = node({ id: 'T-001' });
+  const boardCol = node({ className: 'col', dataset: { col: 'todo' }, open: true });
+  const laneCol = node({ className: 'col', dataset: { col: 'todo' }, open: true }, { dataset: { epic: '' } });
+  const group = node({ className: 'group', dataset: { key: 'A' } });
+  const open = { 'T-001': true, 'board|col|todo|': false, 'lane:|col|todo|': true, 'board|group||A': true };
+  const { calls, ctx } = runPage(pageScript(html(board())), { stored: JSON.stringify({ open, y: 100 }), details: [card, boardCol, laneCol, group] });
+  assert.deepEqual([card.open, boardCol.open, laneCol.open, group.open], [true, false, true, true]);
+  assert.deepEqual(calls.slice(0, 2), [['timeout', 10000], ['scroll', 100]]);
+  ctx.pagehide();
+  assert.deepEqual(calls.at(-1), ['set', 'pm-board:/pm/board.html', { open, y: 42 }]);
+});
+
+test('page script: broken or blocked sessionStorage never stops the reload', () => {
+  const src = pageScript(html(board()));
+  for (const stored of ['{bad', '{"y":5}', '42']) {
+    const { calls, ctx } = runPage(src, { stored, details: [node({ id: 'T-001' })] });
+    assert.deepEqual(calls[0], ['timeout', 10000], stored);
+    assert.doesNotThrow(() => ctx.pagehide());
+  }
+  const denied = () => { throw new Error('denied'); };
+  const { calls, ctx } = runPage(src, { storage: { getItem: denied, setItem: denied } });
+  assert.doesNotThrow(() => ctx.pagehide());
+  assert.deepEqual(calls, [['timeout', 10000]]);
 });
