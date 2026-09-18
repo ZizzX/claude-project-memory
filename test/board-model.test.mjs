@@ -120,7 +120,9 @@ test('html: task text is escaped, only an http(s) PR becomes a link', () => {
 
 test('html: header, expandable cards, dependency links, decisions and epic lanes', () => {
   const h = html(board());
-  assert.match(h, /<p class="generated">generated 2026-09-16 12:00<\/p><ul class="focus"><li>A: ship A<\/li><\/ul>/);
+  assert.match(h, /<p class="generated">generated 2026-09-16 12:00<\/p><details class="focus" open><summary>Focus · 1<\/summary><ul><li>A: ship A<\/li><\/ul><\/details>/);
+  // On a phone the work in hand comes before the backlog.
+  assert.match(h, /@media \(max-width:720px\)\{[^}]*\}[^@]*\.col\[data-col=in_progress\]\{order:-1\}\.col\[data-col=todo\]\{order:1\}/);
   assert.match(h, /<details class="card" id="T-002" data-epic="A" data-col="in_progress"><summary><b>T-002<\/b>/);
   assert.match(h, /<h3>Goal<\/h3><div class="text">goal text<\/div><h3>Understanding<\/h3><div class="text">line 1\nline 2<\/div>/);
   assert.match(h, /<h3>Log · last 3<\/h3>/);

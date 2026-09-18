@@ -287,7 +287,7 @@ export function renderBoardHtml(model, generated = '') {
     board = `<main class="board-empty"><p class="empty">${why}</p></main>`;
   }
   const focus = model.focus.length
-    ? `<ul class="focus">${model.focus.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`
+    ? `<details class="focus" open><summary>Focus · ${model.focus.length}</summary><ul>${model.focus.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>`
     : '<p class="empty">No focus set: add lines under <code>## Current focus</code> in PLAN.md.</p>';
   const epics = model.hasEpics
     ? (open ? '<p><button type="button" id="group" aria-pressed="false" hidden>Group by epic</button></p>' : '')
@@ -313,17 +313,18 @@ export function renderBoardHtml(model, generated = '') {
 a{color:var(--accent)}code{font:12px ui-monospace,monospace;user-select:all}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 h1{font-size:18px;margin:0}.generated{color:var(--muted);font-size:12px;margin:2px 0 8px}
-.focus{margin:0 0 12px;padding-left:18px}.empty{color:var(--muted);margin:0 0 12px}
+.focus{margin:0 0 12px}.focus>summary{cursor:pointer;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.focus ul{margin:4px 0 0;padding-left:18px}.empty{color:var(--muted);margin:0 0 12px}
 button{font:inherit;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer}
 button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 .board{display:grid;grid-template-columns:repeat(5,minmax(200px,1fr));gap:12px;align-items:start}
 .col{background:var(--col);border-radius:8px;padding:0 8px 8px}
 .col>summary{position:sticky;top:0;z-index:1;background:var(--col);padding:8px 4px;cursor:pointer;list-style-position:inside}
 .col h2{display:inline;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.col[data-col=in_progress] h2{color:var(--accent)}.col[data-col=waiting] h2{color:var(--warn)}
 .cards:empty::after{content:"empty";display:block;color:var(--muted);font-size:12px;padding:4px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:8px}
 .card>summary{cursor:pointer;list-style:none}.card>summary::-webkit-details-marker{display:none}
-.card:target{border-color:var(--accent)}
+.card:target,.card[open]{border-color:var(--accent)}
 .title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.card[open] .title{display:inline}
 .meta,.next,.wait{font-size:12px;color:var(--muted);margin-top:4px}.tag{color:var(--accent)}.wait{color:var(--warn)}
 .body{border-top:1px solid var(--line);margin-top:8px;padding-top:4px}
@@ -331,7 +332,9 @@ button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 .text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.body p{margin:6px 0 0;overflow-wrap:anywhere}
 .lane{margin-bottom:20px}.lane-head{font-size:14px;margin:0 0 8px}
 .archive,.decisions{margin-top:16px;color:var(--muted)}.archive .group{margin:8px 0 0 12px}.archive .cards{margin-top:8px;max-width:640px;color:var(--fg)}.decisions ul{padding-left:18px;margin:8px 0}
-@media (max-width:720px){body{padding:12px}.board{grid-template-columns:1fr}}
+/* Phone: one column, the work in hand first; the backlog and the closed follow. */
+@media (max-width:720px){body{padding:12px}.board{grid-template-columns:1fr}.col>summary{padding:12px 4px}
+.col[data-col=in_progress]{order:-1}.col[data-col=todo]{order:1}.col[data-col=done]{order:2}}
 </style></head><body>
 <header><h1>${name}</h1>${generated ? `<p class="generated">generated ${esc(generated)}</p>` : ''}${focus}${epics}</header>
 ${board}${archive}${decisions}
