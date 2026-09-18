@@ -19,7 +19,8 @@ function board(n) {
     const { id } = newTask(pm, { title: `task ${i} ${'words '.repeat(i % 20)}`, epic: epics[i % epics.length], deps: i > 1 && i % 3 === 0 ? [`T-${String(i - 1).padStart(3, '0')}`] : [], date: D });
     const status = STATUSES[i % STATUSES.length];
     appendLog(pm, id, { worktree: 'wt', did: 'something', next: 'the next step', date: D });
-    setFields(pm, id, status === 'waiting' ? { status, waiting_on: 'x' } : { status }, D);
+    // Half of the done tasks closed long ago, so the Archive cards are part of the measured page.
+    setFields(pm, id, status === 'waiting' ? { status, waiting_on: 'x' } : { status }, status === 'done' && i % 2 ? '2026-01-01' : D);
     if (i % 5 === 0) appendDecision(pm, { title: `d${i}`, why: 'w', rejected: 'r', tasks: [id], date: D });
   }
   return pm;

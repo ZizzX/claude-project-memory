@@ -182,8 +182,10 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 - **Dependencies may cross epics.** A task is ready when its dependencies are done, wherever they live.
 - **`PLAN.md` focus is one line per epic:** `- APP-12: parser done, validation next`.
 - **Closing is automatic.** When no task of an epic is open any more, its cards leave the columns and
-  fold into one `Archive` line with the number of done tasks. An epic whose tasks were all dropped just
-  disappears. There is nothing to archive by hand.
+  move into `Archive` as a group of cards you can still expand (Log, branch, PR, closing date). An epic
+  whose tasks were all dropped just disappears. There is nothing to archive by hand.
+- **Done stays short.** On a board with epics the Done column keeps the latest 5 tasks closed in the last
+  20 days; older done cards go to the `Done earlier` group of `Archive`.
 - `pm epics` lists every direction with open/total and its focus line.
 
 Boards without epics behave exactly as they did before epics existed.

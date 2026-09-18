@@ -1,6 +1,6 @@
 {
   "name": "project-memory",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Per-project plan, task board, decision log and session handoff for Claude Code. Local by default, optional sync across machines.",
   "author": { "name": "ZizzX" },
   "repository": "https://github.com/ZizzX/claude-project-memory",

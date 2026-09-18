@@ -33,23 +33,24 @@ function board() {
 }
 
 test('model: columns, archive, epics, focus and decisions from one snapshot', () => {
-  const m = buildBoardModel(loadBoardSnapshot(board()));
+  const m = buildBoardModel(loadBoardSnapshot(board(), undefined, D));
   assert.equal(m.name, 'demo');
   assert.equal(m.hasEpics, true);
   assert.deepEqual(m.focus, ['A: ship A']);
   assert.deepEqual(Object.fromEntries(m.columns.map((c) => [c.key, c.cards.map((x) => x.id)])), {
     todo: [], ready: ['T-003'], in_progress: ['T-002'], waiting: [], done: ['T-001'],
   });
-  assert.deepEqual(m.archive, [{ epic: 'B', done: 1, updated: '2026-09-15' }]);
+  assert.deepEqual(m.archive.done, []);
+  assert.deepEqual(m.archive.epics.map((e) => [e.epic, e.updated, e.cards.map((c) => c.id)]), [['B', '2026-09-15', ['T-004']]], 'a closed epic keeps its done cards, not the dropped one');
   assert.deepEqual(m.epics, [{ key: 'A', open: 1, total: 2 }, { key: 'B', open: 0, total: 1 }], 'dropped tasks are not counted, as in pm epics');
   assert.deepEqual(m.decisions.map((d) => [d.id, d.tasks]), [['D-002', ['T-003', 'T-002']], ['D-001', ['T-002']]], 'newest first');
   assert.doesNotMatch(JSON.stringify(m), /<\w/, 'no markup in the model');
 });
 
 test('model card: details, deps with status, last log entries, decisions', () => {
-  const m = buildBoardModel(loadBoardSnapshot(board()));
+  const m = buildBoardModel(loadBoardSnapshot(board(), undefined, D));
   const c = m.columns.find((x) => x.key === 'in_progress').cards[0];
-  assert.deepEqual(c.deps, [{ id: 'T-001', status: 'done', onBoard: true }, { id: 'T-004', status: 'done', onBoard: false }]);
+  assert.deepEqual(c.deps, [{ id: 'T-001', status: 'done', onBoard: true }, { id: 'T-004', status: 'done', onBoard: true }]);
   assert.equal(c.goal, 'goal text');
   assert.equal(c.understanding, 'line 1\nline 2');
   assert.equal(c.checklist, '- [ ] one');
@@ -67,15 +68,15 @@ test('model card: details, deps with status, last log entries, decisions', () =>
 test('model: a task body without sections and an empty board', () => {
   const pm = tmp();
   fs.writeFileSync(planFile(pm), planTemplate('demo', D));
-  const empty = buildBoardModel(loadBoardSnapshot(pm));
-  assert.deepEqual([empty.hasEpics, empty.focus, empty.archive, empty.epics, empty.decisions], [false, [], [], [], []]);
+  const empty = buildBoardModel(loadBoardSnapshot(pm, undefined, D));
+  assert.deepEqual([empty.hasEpics, empty.focus, empty.archive, empty.epics, empty.decisions], [false, [], { done: [], epics: [] }, [], []]);
   assert.ok(empty.columns.every((c) => c.cards.length === 0));
   newTask(pm, { title: 'bare', date: D });
   const t = readTask(pm, 'T-001');
   t.body = 'free text\n';
   writeTask(t);
   appendLogLine(pm, 'T-001', '- note', D);
-  const c = buildBoardModel(loadBoardSnapshot(pm)).columns.find((x) => x.key === 'ready').cards[0];
+  const c = buildBoardModel(loadBoardSnapshot(pm, undefined, D)).columns.find((x) => x.key === 'ready').cards[0];
   assert.deepEqual([c.goal, c.log], ['', []]);
 });
 
@@ -99,7 +100,7 @@ test('writeBoard falls back to a plain write when the rename is refused', (t) =>
   assert.deepEqual(fs.readdirSync(pm).filter((f) => f.endsWith('.tmp')), []);
 });
 
-const html = (pm) => renderBoardHtml(buildBoardModel(loadBoardSnapshot(pm)), '2026-09-16 12:00');
+const html = (pm) => renderBoardHtml(buildBoardModel(loadBoardSnapshot(pm, undefined, D)), '2026-09-16 12:00');
 
 test('html: task text is escaped, only an http(s) PR becomes a link', () => {
   const pm = board();
@@ -122,7 +123,7 @@ test('html: header, expandable cards, dependency links, decisions and epic lanes
   assert.match(h, /<details class="card" id="T-002" data-epic="A" data-col="in_progress"><summary><b>T-002<\/b>/);
   assert.match(h, /<h3>Goal<\/h3><div class="text">goal text<\/div><h3>Understanding<\/h3><div class="text">line 1\nline 2<\/div>/);
   assert.match(h, /<h3>Log · last 3<\/h3>/);
-  assert.match(h, /after <a href="#T-001">T-001<\/a>, T-004 \(done\)/, 'a card not on the board is text with its status');
+  assert.match(h, /after <a href="#T-001">T-001<\/a>, <a href="#T-004">T-004<\/a>/, 'an archived card is a link too');
   assert.match(h, /branch <code>feat\/T-002\/x<\/code>/);
   assert.match(h, /<code>pm claim T-002<\/code>/);
   assert.doesNotMatch(h, /pm claim T-001/, 'no start command on a done card');
@@ -132,6 +133,50 @@ test('html: header, expandable cards, dependency links, decisions and epic lanes
   assert.match(h, /<section class="lane" data-epic=""><h2 class="lane-head">No epic<\/h2>/);
   assert.doesNotMatch(h, /data-epic="B"><h2/, 'a closed epic has no lane');
   assert.match(h, /<button type="button" id="group" aria-pressed="false" hidden>/);
+});
+
+test('model: Done keeps the last 5 closed within 20 days, older done cards go to the Archive newest first', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'open', epic: 'A', date: D });
+  for (const day of ['2026-08-01', '2026-08-27', '2026-08-28', D, D, D, D, D, D]) {
+    setFields(pm, newTask(pm, { title: day, epic: 'A', date: D }).id, { status: 'done' }, day);
+  }
+  const m = buildBoardModel(loadBoardSnapshot(pm, undefined, D));
+  assert.deepEqual(m.columns.find((c) => c.key === 'done').cards.map((c) => c.id), ['T-006', 'T-007', 'T-008', 'T-009', 'T-010'], 'the last 5 by order');
+  assert.deepEqual(m.archive.done.map((c) => [c.id, c.updated]), [['T-005', D], ['T-004', '2026-08-28'], ['T-003', '2026-08-27'], ['T-002', '2026-08-01']], 'newest first');
+  const h = renderBoardHtml(m);
+  assert.match(h, /<details class="archive"><summary>Archive · 4<\/summary><details class="group"><summary>Done earlier · 4<\/summary><div class="cards"><details class="card" id="T-005"/);
+  assert.match(h, /<span>closed 2026-08-01<\/span>/, 'a done card shows its closing date');
+  assert.equal(h.match(/id="T-002"/g).length, 1);
+});
+
+test('model: a done card is fresh up to exactly 20 days, older ones leave Done even under the cap', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'open', epic: 'A', date: D });
+  setFields(pm, newTask(pm, { title: 'old', epic: 'A', date: D }).id, { status: 'done' }, '2026-08-26');
+  setFields(pm, newTask(pm, { title: 'edge', epic: 'A', date: D }).id, { status: 'done' }, '2026-08-27');
+  const m = buildBoardModel(loadBoardSnapshot(pm, undefined, D));
+  assert.deepEqual(m.columns.find((c) => c.key === 'done').cards.map((c) => c.id), ['T-003']);
+  assert.deepEqual(m.archive.done.map((c) => c.id), ['T-002']);
+});
+
+test('model: Done picks the 5 latest by closing date, not by order; no date ages out; a bad today ages nothing', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'open', epic: 'A', date: D });
+  for (const day of [D, '2026-09-01', '2026-09-01', '2026-09-01', '2026-09-01', '2026-09-01']) {
+    setFields(pm, newTask(pm, { title: day, epic: 'A', date: D }).id, { status: 'done' }, day);
+  }
+  const t = readTask(pm, 'T-003');
+  delete t.data.updated;
+  writeTask(t);
+  const m = buildBoardModel(loadBoardSnapshot(pm, undefined, D));
+  assert.deepEqual(m.columns.find((c) => c.key === 'done').cards.map((c) => c.id), ['T-002', 'T-004', 'T-005', 'T-006', 'T-007'], 'the lowest order closed today stays');
+  assert.deepEqual(m.archive.done.map((c) => c.id), ['T-003'], 'a done task without a date is not fresh');
+  const bad = buildBoardModel(loadBoardSnapshot(pm, undefined, '18.09.2026'));
+  assert.equal(bad.columns.find((c) => c.key === 'done').cards.length, 5, 'still capped, nothing thrown');
 });
 
 test('html: empty states', () => {

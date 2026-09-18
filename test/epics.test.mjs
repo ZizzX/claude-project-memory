@@ -181,11 +181,11 @@ test('board views take the task list once and show the epic and the focus list',
   assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<span class="tag">B<\/span>/);
 });
 
-test('board without epics: Done is not capped, html has no archive block', () => {
+test('board without epics: Done is neither capped nor aged, html has no archive block', () => {
   const pm = tmp();
   fs.writeFileSync(planFile(pm), planTemplate('demo', D));
-  for (let i = 0; i < 7; i += 1) setFields(pm, newTask(pm, { title: `d${i}`, date: D }).id, { status: 'done' }, D);
-  writeBoard(pm);
+  for (let i = 0; i < 7; i += 1) setFields(pm, newTask(pm, { title: `d${i}`, date: D }).id, { status: 'done' }, '2026-01-01');
+  writeBoard(pm, undefined, D);
   const md = fs.readFileSync(`${pm}/BOARD.md`, 'utf8');
   assert.match(md, /## Done \(7\)\n- \*\*T-001\*\* d0\n/);
   assert.doesNotMatch(md, /shown|Archive/);
@@ -194,7 +194,7 @@ test('board without epics: Done is not capped, html has no archive block', () =>
   assert.match(html, /<h2>Done · 7<\/h2>/);
 });
 
-test('archive: a closed epic collapses to one line, its done tasks still satisfy dependencies', () => {
+test('archive: a closed epic moves its done cards into the Archive, they still satisfy dependencies', () => {
   const pm = tmp();
   fs.writeFileSync(planFile(pm), planTemplate('demo', D));
   newTask(pm, { title: 'a-done', epic: 'A', date: D });
@@ -207,27 +207,29 @@ test('archive: a closed epic collapses to one line, its done tasks still satisfy
   newTask(pm, { title: 'a-older', epic: 'A', date: D });
   setFields(pm, 'T-005', { status: 'done' }, '2026-09-12');
   let tasks = listTasks(pm);
-  assert.deepEqual([...archived(tasks)], [['A', { n: 2, updated: '2026-09-13' }]], 'C is all dropped, the plain task has no epic, the latest date wins');
+  assert.deepEqual([...archived(tasks)], [['A', '2026-09-13']], 'C is all dropped, the plain task has no epic, the latest date wins');
   const cols = columns(tasks, archived(tasks));
   assert.deepEqual(cols.ready.map((t) => t.id), ['T-002'], 'the hidden done task is still a satisfied dependency');
   assert.deepEqual(cols.done.map((t) => t.id), ['T-004']);
-  writeBoard(pm, tasks);
+  writeBoard(pm, tasks, D);
   const md = fs.readFileSync(`${pm}/BOARD.md`, 'utf8');
   assert.match(md, /\n## Archive\n- A · 2 done · 2026-09-13\n$/);
-  assert.doesNotMatch(md, /\*\*T-001\*\*|\*\*T-003\*\*|\*\*T-005\*\*/, 'no card for an archived or dropped task');
+  assert.doesNotMatch(md, /\*\*T-001\*\*|\*\*T-003\*\*|\*\*T-005\*\*/, 'BOARD.md keeps one line per closed epic');
   assert.match(md, /## Done \(1\)\n- \*\*T-004\*\* plain-done\n/);
-  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<details class="archive"><summary>Archive · 1<\/summary><div>A · 2 done · 2026-09-13<\/div><\/details>/);
-  // One reopened task brings the epic back to the columns; Done is capped in the view only.
+  const html = fs.readFileSync(`${pm}/board.html`, 'utf8');
+  assert.match(html, /<details class="archive"><summary>Archive · 2<\/summary><details class="group"><summary>A · 2 done · 2026-09-13<\/summary><div class="cards"><details class="card" id="T-001" data-epic="A" data-col="archive">/);
+  assert.match(html, /id="T-005"/);
+  assert.doesNotMatch(html, /id="T-003"/, 'a dropped task stays hidden');
+  // One reopened task brings the epic back to the columns; the done cards past the latest 5 go to the Archive.
   for (let i = 0; i < 6; i += 1) setFields(pm, newTask(pm, { title: `a${i}`, epic: 'A', date: D }).id, { status: 'done' }, D);
   newTask(pm, { title: 'a-again', epic: 'A', date: D });
   tasks = listTasks(pm);
   assert.equal(archived(tasks).size, 0);
-  writeBoard(pm, tasks);
+  writeBoard(pm, tasks, D);
   const md2 = fs.readFileSync(`${pm}/BOARD.md`, 'utf8');
-  assert.doesNotMatch(md2, /## Archive/);
-  assert.match(md2, /## Done \(9, 5 shown\)\n- \*\*T-007\*\*/, 'full count in the heading, latest stages shown');
-  assert.doesNotMatch(md2, /\*\*T-001\*\*/);
-  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<h2>Done · 9, 5 shown<\/h2>/);
+  assert.match(md2, /## Done \(5\)\n- \*\*T-007\*\*/, 'latest stages shown');
+  assert.match(md2, /\n## Archive\n- Done earlier · 4\n$/);
+  assert.match(fs.readFileSync(`${pm}/board.html`, 'utf8'), /<h2>Done · 5<\/h2>/);
 });
 
 test('cli: --epic on task new, ready narrowed to the worktree epic, pm epics', () => {

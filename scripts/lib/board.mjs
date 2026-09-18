@@ -3,6 +3,7 @@ import path from 'node:path';
 import { listTasks, readyQueue, lastNext, isOpen } from './tasks.mjs';
 import { readPlan, nameOf, focusListOf } from './plan.mjs';
 import { readDecisions } from './decisions.mjs';
+import { today as localToday } from './paths.mjs';
 
 export const COLUMNS = [
   ['todo', 'Todo'],
@@ -12,17 +13,18 @@ export const COLUMNS = [
   ['done', 'Done'],
 ];
 const DONE_MAX = 5;
+const DONE_DAYS = 20;
 const LOG_MAX = 3;
 
-// An epic with no open task is closed: its cards collapse into one archive line.
-// Tasks without an epic are never archived, so a board without epics renders as before.
+// An epic with no open task is closed: its done cards move into the Archive. Epic key → its latest `updated`.
+// A task without an epic never closes with an epic, so a board without epics renders as before.
 export function archived(tasks) {
   const live = new Set(tasks.filter(isOpen).map((t) => t.data.epic));
   const out = new Map();
   for (const t of tasks) {
     if (!t.data.epic || live.has(t.data.epic) || t.data.status === 'dropped') continue;
-    const a = out.get(t.data.epic) ?? { n: 0, updated: '' };
-    out.set(t.data.epic, { n: a.n + 1, updated: t.data.updated > a.updated ? t.data.updated : a.updated });
+    const at = out.get(t.data.epic) ?? '';
+    out.set(t.data.epic, t.data.updated > at ? t.data.updated : at);
   }
   return out;
 }
@@ -40,10 +42,19 @@ export function columns(tasks, arch = new Map()) {
   return cols;
 }
 
-// The only part that touches the disk: every view renders from one read of the board.
-export function loadBoardSnapshot(pm, tasks = listTasks(pm)) {
-  return { tasks, plan: readPlan(pm), decisions: readDecisions(pm) };
+// The only part that touches the disk and the clock: every view renders from one read of the board.
+// `today` comes from the same helper that writes `updated`, so both share one format and time zone.
+export function loadBoardSnapshot(pm, tasks = listTasks(pm), today = localToday()) {
+  return { tasks, plan: readPlan(pm), decisions: readDecisions(pm), today };
 }
+
+// A date that is not YYYY-MM-DD gives '': nothing ages out, rather than every command failing on the board.
+const daysBefore = (day, n) => {
+  const t = Date.parse(`${day}T00:00:00Z`);
+  return Number.isNaN(t) ? '' : new Date(t - n * 864e5).toISOString().slice(0, 10);
+};
+// Newest closing date first; within one day the later stage (higher order) first.
+const latestFirst = (a, b) => (b.updated > a.updated ? 1 : b.updated < a.updated ? -1 : b.order - a.order);
 
 // "## Name" sections of a task body, keyed by lower-cased name.
 function sections(body) {
@@ -56,12 +67,23 @@ function sections(body) {
 }
 
 // Pure: the snapshot in, plain data out — no markup, so md, html and `pm status` are separate projections.
-export function buildBoardModel({ tasks, plan, decisions }) {
+export function buildBoardModel({ tasks, plan, decisions, today }) {
   const arch = archived(tasks);
   const cols = columns(tasks, arch);
   const keys = new Set(tasks.map((t) => t.data.epic).filter(Boolean));
+  // On a board with epics Done keeps the DONE_MAX latest closed in the last DONE_DAYS, in column order; every other done
+  // card, with an epic or without, goes to the Archive. A board without epics keeps every done card in the column, as before.
+  let older = [];
+  if (keys.size) {
+    const since = daysBefore(today, DONE_DAYS);
+    const fresh = new Set(cols.done.filter((t) => (t.data.updated ?? '') >= since)
+      .sort((a, b) => latestFirst(a.data, b.data)).slice(0, DONE_MAX));
+    older = cols.done.filter((t) => !fresh.has(t));
+    cols.done = cols.done.filter((t) => fresh.has(t));
+  }
+  const closed = tasks.filter((t) => arch.has(t.data.epic) && t.data.status === 'done');
   const status = new Map(tasks.map((t) => [t.id, t.data.status]));
-  const onBoard = new Set(Object.values(cols).flat().map((t) => t.id));
+  const onBoard = new Set([...Object.values(cols).flat(), ...older, ...closed].map((t) => t.id));
   const byTask = new Map();
   // Oldest first, like `pm show`.
   for (const d of decisions) for (const id of d.tasks) byTask.set(id, [...(byTask.get(id) ?? []), d.id]);
@@ -97,7 +119,10 @@ export function buildBoardModel({ tasks, plan, decisions }) {
     dropped: tasks.filter((t) => t.data.status === 'dropped').length,
     focus: focusListOf(plan, keys),
     columns: COLUMNS.map(([key, label]) => ({ key, label, cards: cols[key].map(card) })),
-    archive: [...arch].map(([epic, a]) => ({ epic, done: a.n, updated: a.updated })),
+    archive: {
+      done: older.map(card).sort(latestFirst),
+      epics: [...arch].map(([epic, updated]) => ({ epic, updated, cards: closed.filter((t) => t.data.epic === epic).map(card).sort(latestFirst) })),
+    },
     epics: [...keys].map((key) => {
       const of = tasks.filter((t) => t.data.epic === key && t.data.status !== 'dropped'); // as `pm epics` counts
       return { key, open: of.filter(isOpen).length, total: of.length };
@@ -106,10 +131,11 @@ export function buildBoardModel({ tasks, plan, decisions }) {
   };
 }
 
-// On a board with epics, Done is capped in the view only (highest order = latest stages); the heading keeps the full count.
-const shown = (col, cap) => (cap && col.key === 'done' ? col.cards.slice(-DONE_MAX) : col.cards);
-const count = (col, list) => `${col.cards.length}${list.length < col.cards.length ? `, ${list.length} shown` : ''}`;
-const archiveLine = (a) => `${a.epic} · ${a.done} done${a.updated ? ` · ${a.updated}` : ''}`;
+// One line per Archive group: older done cards first, then every closed epic.
+const archiveGroups = (a) => [
+  ...(a.done.length ? [{ head: `Done earlier · ${a.done.length}`, cards: a.done }] : []),
+  ...a.epics.map((e) => ({ head: `${e.epic} · ${e.cards.length} done${e.updated ? ` · ${e.updated}` : ''}`, cards: e.cards })),
+];
 const after = (c) => c.deps.map((d) => d.id).join(', ');
 
 function cardLine(c) {
@@ -125,11 +151,10 @@ function cardLine(c) {
 
 export function renderBoardMd(model) {
   const out = [`# Board — ${model.name}`, '', `Focus: ${model.focus.join(' · ') || '—'}`, '', '<!-- generated by pm; do not edit -->'];
-  for (const col of model.columns) {
-    const list = shown(col, model.hasEpics);
-    out.push('', `## ${col.label} (${count(col, list)})`, ...list.map(cardLine));
-  }
-  if (model.archive.length) out.push('', '## Archive', ...model.archive.map((a) => `- ${archiveLine(a)}`));
+  for (const col of model.columns) out.push('', `## ${col.label} (${col.cards.length})`, ...col.cards.map(cardLine));
+  // Archive cards stay out of BOARD.md: the session summary points to it, so it must stay short.
+  const groups = archiveGroups(model.archive);
+  if (groups.length) out.push('', '## Archive', ...groups.map((g) => `- ${g.head}`));
   return `${out.join('\n')}\n`;
 }
 
@@ -144,6 +169,7 @@ function card(c, col, linked) {
     c.milestone && `<span class="tag">${esc(c.milestone)}</span>`,
     c.deps.length && `<span>after ${esc(after(c))}</span>`,
     c.worktrees.length && `<span>@ ${esc(c.worktrees.join(', '))}</span>`,
+    c.status === 'done' && c.updated && `<span>closed ${esc(c.updated)}</span>`,
   ].filter(Boolean).join(' ');
   const text = (label, s) => (s ? `<h3>${label}</h3><div class="text">${esc(s)}</div>` : '');
   const facts = [
@@ -172,7 +198,7 @@ const column = (col, label, cards = '') => `<details class="col" open data-col="
 function lanes(model, cols) {
   const focus = (key) => model.focus.find((l) => l.startsWith(`${key}: `))?.slice(key.length + 2) ?? '';
   const keys = model.epics.filter((e) => e.open);
-  if (cols.some((c) => c.list.some((x) => !x.epic))) keys.push({ key: '', open: 0, total: 0 });
+  if (cols.some((c) => c.cards.some((x) => !x.epic))) keys.push({ key: '', open: 0, total: 0 });
   return `<div id="lanes" hidden>${keys.map((e) => {
     const head = e.key ? `${esc(e.key)} · ${e.open} open of ${e.total}${focus(e.key) ? ` · ${esc(focus(e.key))}` : ''}` : 'No epic';
     return `<section class="lane" data-epic="${esc(e.key)}"><h2 class="lane-head">${head}</h2><div class="board">${
@@ -208,7 +234,8 @@ const SCRIPT = `(() => {
     const to = a && document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)));
     if (!to) return;
     e.preventDefault();
-    to.open = true;
+    // An archived card sits inside the closed Archive and its group: open them too.
+    for (let d = to; d; d = d.parentElement.closest('details')) d.open = true;
     to.scrollIntoView({ block: 'center' });
     to.querySelector('summary').focus();
   });
@@ -219,11 +246,13 @@ const SCRIPT = `(() => {
 
 export function renderBoardHtml(model, generated = '') {
   const name = esc(model.name);
-  const cols = model.columns.map((col) => ({ ...col, list: shown(col, model.hasEpics) }));
-  const linked = new Set(cols.flatMap((c) => c.list.map((x) => x.id)));
+  const cols = model.columns;
+  const groups = archiveGroups(model.archive);
+  const open = cols.some((c) => c.cards.length);
+  const linked = new Set([...cols, ...groups].flatMap((c) => c.cards.map((x) => x.id)));
   let board;
-  if (linked.size) {
-    board = `<main class="board" id="board">${cols.map((c) => column(c, `${c.label} · ${count(c, c.list)}`, c.list.map((x) => card(x, c.key, linked)).join(''))).join('')}</main>`
+  if (open) {
+    board = `<main class="board" id="board">${cols.map((c) => column(c, `${c.label} · ${c.cards.length}`, c.cards.map((x) => card(x, c.key, linked)).join(''))).join('')}</main>`
       + (model.hasEpics ? lanes(model, cols) : '');
   } else {
     const why = model.total === 0 ? 'No tasks yet. Create the first one: <code>pm task new --title …</code>'
@@ -235,12 +264,13 @@ export function renderBoardHtml(model, generated = '') {
     ? `<ul class="focus">${model.focus.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`
     : '<p class="empty">No focus set: add lines under <code>## Current focus</code> in PLAN.md.</p>';
   const epics = model.hasEpics
-    ? (linked.size ? '<p><button type="button" id="group" aria-pressed="false" hidden>Group by epic</button></p>' : '')
+    ? (open ? '<p><button type="button" id="group" aria-pressed="false" hidden>Group by epic</button></p>' : '')
     : '<p class="empty">No epics: <code>pm task new --epic KEY</code> groups tasks by direction.</p>';
-  const archive = model.archive.length
-    ? `<details class="archive"><summary>Archive · ${model.archive.length}</summary>${model.archive.map((a) => `<div>${esc(archiveLine(a))}</div>`).join('')}</details>`
+  const archive = groups.length
+    ? `<details class="archive"><summary>Archive · ${groups.reduce((n, g) => n + g.cards.length, 0)}</summary>${groups.map((g) => `<details class="group"><summary>${esc(g.head)}</summary><div class="cards">${
+      g.cards.map((x) => card(x, 'archive', linked)).join('')}</div></details>`).join('')}</details>`
     : '';
-  const script = linked.size > 0 && model.hasEpics;
+  const script = open && model.hasEpics;
   const recent = model.decisions.slice(0, DECISIONS_MAX);
   const ref = (id) => (linked.has(id) ? `<a href="#${esc(id)}">${esc(id)}</a>` : esc(id));
   const decisions = recent.length
@@ -275,7 +305,7 @@ button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 .body h3{font-size:11px;margin:8px 0 2px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.body p{margin:6px 0 0;overflow-wrap:anywhere}
 .lane{margin-bottom:20px}.lane-head{font-size:14px;margin:0 0 8px}
-.archive,.decisions{margin-top:16px;color:var(--muted)}.decisions ul{padding-left:18px;margin:8px 0}
+.archive,.decisions{margin-top:16px;color:var(--muted)}.archive .group{margin:8px 0 0 12px}.archive .cards{margin-top:8px;max-width:640px;color:var(--fg)}.decisions ul{padding-left:18px;margin:8px 0}
 @media (max-width:720px){body{padding:12px}.board{grid-template-columns:1fr}}
 </style></head><body>
 <header><h1>${name}</h1>${generated ? `<p class="generated">generated ${esc(generated)}</p>` : ''}${focus}${epics}</header>
@@ -298,8 +328,8 @@ function writeAtomic(file, text) {
 }
 
 // One read of the board for both views; callers that already hold the tasks pass them in.
-export function writeBoard(pm, tasks) {
-  const model = buildBoardModel(loadBoardSnapshot(pm, tasks));
+export function writeBoard(pm, tasks, today) {
+  const model = buildBoardModel(loadBoardSnapshot(pm, tasks, today));
   writeAtomic(path.join(pm, 'BOARD.md'), renderBoardMd(model));
   // sv-SE formats local time as "YYYY-MM-DD HH:MM:SS".
   writeAtomic(path.join(pm, 'board.html'), renderBoardHtml(model, new Date().toLocaleString('sv-SE').slice(0, 16)));
