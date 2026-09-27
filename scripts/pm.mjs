@@ -8,7 +8,7 @@ import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
 import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
-import { showTask, CLOSED_PREFIX } from './lib/show.mjs';
+import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
@@ -17,7 +17,7 @@ import { scanPlans } from './lib/scan.mjs';
 import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
-import { runMergeCheck, reconcile, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
+import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
 import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -27,6 +27,7 @@ const USAGE = `usage: pm <command>
   set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, pr, ...)
   claim <id>                                   attach this worktree and set in_progress (a review task keeps review)
   log <id> --did "..." --next "..."            append a work log entry
+  done <id> [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
   show <id>                                    task history: branch, pr, timeline, commits, decisions, dependents
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
@@ -264,6 +265,16 @@ Re-run with --yes to proceed.`;
   _push(cwd, [pm]) {
     pushNow(pm);
     return '';
+  },
+
+  done(cwd, [id, ...args]) {
+    const v = parseArgs({ args, options: { did: { type: 'string' }, pr: { type: 'string' }, 'no-merge': { type: 'boolean' } } }).values;
+    if (!id || id.startsWith('-')) fail('usage: pm done <id> [--did "..."] [--pr <url> | --no-merge]');
+    const pm = requireBoard(cwd);
+    const { status, line } = markDone({ pm, cwd, id, did: v.did, pr: v.pr, noMerge: Boolean(v['no-merge']), worktree: worktreeName(cwd), date: today() });
+    startCapture(pm, cwd); // commits made in another status are never linked later
+    persist(pm, `${DONE_PREFIX}${id} → ${status}`);
+    return line;
   },
 
   reconcile(cwd, args) {

@@ -338,3 +338,80 @@ test('cli: pm reconcile closes the awaiting-merge task, asks about the rest, --y
   assert.match(t2, /merged_how: subject/);
   assert.match(t2, /· pm · merged [0-9a-f]{7}, closed by pm reconcile --yes\n$/);
 });
+
+// --- pm done ---
+
+// A board with T-001 claimed in `root` (branch main, no origin) and a forge fixture.
+function doneBoard(responses = {}) {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a'], root);
+  cli(['claim', 'T-001'], root);
+  const fixture = path.join(tmp(), 'forge.json');
+  fs.writeFileSync(fixture, JSON.stringify(responses));
+  return { root, env: { PM_FORGE_FIXTURE: fixture }, file: path.join(pmDir(root), 'tasks', 'T-001.md') };
+}
+const openPr = { html_url: 'https://github.com/o/r/pull/15', state: 'open', merged_at: null, base: { ref: 'main' }, head: { ref: 'feat/a' }, user: { login: 'a' } };
+const mergedPr = { ...openPr, state: 'closed', merged_at: '2026-09-21T09:00:00Z', merge_commit_sha: 'abc1234def' };
+
+test('pm done: a claimed task with a branch but no commits or PR is done (research)', () => {
+  const { root, file } = doneBoard();
+  const r = cli(['done', 'T-001', '--did', 'compared the two libraries'], root);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'T-001 → done: no PR or commits, nothing to merge');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.match(text, /status: done/);
+  assert.match(text, /did: compared the two libraries · next: —\n$/);
+  assert.match(cli(['show', 'T-001'], root).out, /timeline: created .+ · claimed .+ · done /);
+});
+
+test('pm done: needs a Log entry or --did; --pr and --no-merge exclude each other', () => {
+  const { root } = doneBoard();
+  const r = cli(['done', 'T-001'], root);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /T-001 has no Log entry yet — say what was done: pm done T-001 --did/);
+  assert.equal(cli(['done', 'T-001', '--did', 'x', '--no-merge', '--pr', 'https://github.com/o/r/pull/15'], root).code, 1);
+  assert.match(cli(['done', 'T-001', '--did', 'x', '--pr', 'nope'], root).err, /unknown PR URL "nope"/);
+  cli(['log', 'T-001', '--did', 'a', '--next', 'b'], root);
+  assert.equal(cli(['done', 'T-001'], root).code, 0, 'a Log entry is enough');
+  assert.match(cli(['done', 'T-001'], root).err, /T-001 is already done/);
+});
+
+test('pm done: a commit right after claim (no Stop in between) is captured, so the task awaits its merge', () => {
+  const { root, file } = doneBoard();
+  commit(root, 'feat(T-001): part a', new Date().toISOString());
+  const r = cli(['done', 'T-001', '--did', 'part a'], root);
+  assert.equal(r.out, 'T-001 → review: 1 commit, no PR found; closes by itself after the merge (git config pm.autoClose false turns that off)');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.match(text, /status: review/);
+  assert.match(text, /review_at: "?\d{4}-\d{2}-\d{2}T/);
+  assert.match(text, /commits:/);
+  assert.match(text, /next: merge the commits into the default branch\n$/);
+  assert.match(cli(['show', 'T-001'], root).out, /· claimed .+ · review /);
+});
+
+test('pm done --pr: open → review with the pr stored; already merged → done with the merge', () => {
+  const open = doneBoard({ 'repos/o/r/pulls/15': openPr });
+  const r = cli(['done', 'T-001', '--did', 'x', '--pr', 'https://github.com/o/r/pull/15'], open.root, { env: open.env });
+  assert.equal(r.out, 'T-001 → review: #15 not merged yet; closes by itself after the merge (git config pm.autoClose false turns that off)');
+  assert.match(fs.readFileSync(open.file, 'utf8'), /pr: "?https:\/\/github.com\/o\/r\/pull\/15/);
+
+  const merged = doneBoard({ 'repos/o/r/pulls/15': mergedPr });
+  sh(['update-ref', 'refs/remotes/origin/main', 'HEAD'], merged.root);
+  const m = cli(['done', 'T-001', '--did', 'x', '--pr', 'https://github.com/o/r/pull/15'], merged.root, { env: merged.env });
+  assert.equal(m.out, 'T-001 → done: #15 is already merged');
+  const text = fs.readFileSync(merged.file, 'utf8');
+  assert.match(text, /merged_sha: "?abc1234def/);
+  assert.match(text, /merged_how: forge/);
+  assert.doesNotMatch(text, /review_at/);
+});
+
+test('pm done --no-merge forces done; pm.autoClose=false says reconcile will ask', () => {
+  const a = doneBoard();
+  commit(a.root, 'feat(T-001): part a', new Date().toISOString());
+  assert.equal(cli(['done', 'T-001', '--did', 'x', '--no-merge'], a.root).out, 'T-001 → done: --no-merge');
+  const b = doneBoard();
+  commit(b.root, 'feat(T-001): part a', new Date().toISOString());
+  sh(['config', 'pm.autoClose', 'false'], b.root);
+  assert.match(cli(['done', 'T-001', '--did', 'x'], b.root).out, /^T-001 → review: 1 commit, no PR found; pm reconcile asks to close it after the merge \(pm.autoClose is false\)$/);
+});

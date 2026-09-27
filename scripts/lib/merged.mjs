@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { tryGit } from './paths.mjs';
 import { readState, writeState } from './store.mjs';
 import { defaultBranch, isDefaultBranch, prLookup, parsePrUrl } from './forge.mjs';
-import { listTasks, readTask, setFields, appendLogLine } from './tasks.mjs';
+import { listTasks, readTask, setFields, appendLog, appendLogLine } from './tasks.mjs';
+import { captureCommits } from './gitlink.mjs';
 
 const PM_SCRIPT = fileURLToPath(new URL('../pm.mjs', import.meta.url));
 
@@ -313,4 +314,48 @@ export function reconcile({ pm, cwd, yes = false, fetch = true, date, now = Date
   for (const n of out.notChecked) lines.push(problem(`Merge not checked: ${n.id}`, n.reason, notCheckedFix(n.id, n.reason)));
   if (lines.length === 1) lines.push(`Nothing merged among ${mergeCandidates(tasks).length} open tasks.`);
   return { lines, closed: closed.map((c) => c.split(' ')[0]) };
+}
+
+// --- pm done: finished and verified; done now, or review until the merge closes it ---
+
+const hasLogEntry = (task) => /^- \d{4}-\d{2}-\d{2} · /m.test(task.body);
+
+// Decides and writes done or review. A merge is expected when the task has a `pr` or captured `commits`
+// (a branch alone does not count: pm claim records one even for research). noMerge forces done, pr forces the
+// merge path. Returns { status, line } — the line says the outcome and why.
+export function markDone({ pm, cwd, id, did, pr, noMerge = false, worktree, date, now = Date.now() }) {
+  if (pr && noMerge) throw new Error('usage: pm done <id> [--did "..."] [--pr <url> | --no-merge]');
+  if (pr && !parsePrUrl(pr)) throw new Error(`unknown PR URL "${pr}" — expected a GitHub PR or GitLab MR url`);
+  const before = readTask(pm, id);
+  if (!OPEN_FOR_MERGE.includes(before.data.status)) throw new Error(`${id} is already ${before.data.status}`);
+  if (!did && !hasLogEntry(before)) throw new Error(`${id} has no Log entry yet — say what was done: pm done ${id} --did "..."`);
+  captureCommits(pm, cwd); // commits made since the last Stop still belong to this task
+  const task = readTask(pm, id);
+  const data = { ...task.data, ...(pr && { pr }) };
+  const commits = data.commits?.length ?? 0;
+  const expects = !noMerge && Boolean(data.pr || commits);
+  const finish = (status, fields, why, next) => {
+    setFields(pm, id, { status, ...fields }, date);
+    if (did) appendLog(pm, id, { worktree, did, next, date });
+    return { status, line: `${id} → ${status}: ${why}` };
+  };
+  if (!expects) {
+    return finish('done', {}, noMerge ? '--no-merge' : 'no PR or commits, nothing to merge', '—');
+  }
+  const r = prLookup(data, cwd);
+  const found = r.status === 'ok' ? r.pr : null;
+  const label = prLabel(found?.url ?? data.pr) ?? (found?.url || null);
+  const def = defaultBranch(cwd);
+  if (found?.state === 'merged' && (!def || !found.base || found.base === def.branch)) {
+    const at = found.mergedAt ? new Date(found.mergedAt * 1000).toISOString() : '';
+    return finish('done', { pr: found.url, merged_sha: found.mergeSha ?? found.squashSha ?? '', merged_how: 'forge', merged_at: at }, `${label} is already merged`, '—');
+  }
+  const fields = { review_at: new Date(now).toISOString(), ...((pr || found?.url) && { pr: pr || found.url }) };
+  const why = found ? `${label} not merged yet`
+    : r.status === 'error' ? `merge not checked (${r.cause})`
+      : `${commits} commit${commits === 1 ? '' : 's'}, no PR found`;
+  const after = autoCloseEnabled(cwd)
+    ? 'closes by itself after the merge (git config pm.autoClose false turns that off)'
+    : 'pm reconcile asks to close it after the merge (pm.autoClose is false)';
+  return finish('review', fields, `${why}; ${after}`, `merge ${label ?? 'the commits'} into the default branch`);
 }
