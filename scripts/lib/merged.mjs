@@ -4,8 +4,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tryGit } from './paths.mjs';
 import { readState, writeState } from './store.mjs';
-import { defaultBranch, isDefaultBranch, prLookup } from './forge.mjs';
-import { listTasks } from './tasks.mjs';
+import { defaultBranch, isDefaultBranch, prLookup, parsePrUrl } from './forge.mjs';
+import { listTasks, readTask, setFields, appendLogLine } from './tasks.mjs';
 
 const PM_SCRIPT = fileURLToPath(new URL('../pm.mjs', import.meta.url));
 
@@ -48,21 +48,22 @@ export function sinceDate(tasks) {
 }
 
 // Local signal, no network: subjects on origin's default branch that name an open task.
-// { branch, hits: Map<id, { how, sha, at, pr }> (newest commit per id), notChecked } — never throws.
+// { branch, hits: Map<id, { how, sha, at, pr }> (newest commit per id), cause, notChecked } — never throws.
 export function subjectHits(cwd, tasks) {
   const candidates = mergeCandidates(tasks);
   const def = defaultBranch(cwd);
   const hits = new Map();
   if (!def) {
-    const notChecked = problem('Merge not checked', 'origin has no default branch here (no origin/HEAD, origin/main or origin/master)', 'git fetch origin, then pm reconcile');
-    return { branch: null, hits, notChecked };
+    const cause = 'origin has no default branch here (no origin/HEAD, origin/main or origin/master)';
+    return { branch: null, hits, cause, notChecked: problem('Merge not checked', cause, 'git fetch origin, then pm reconcile') };
   }
   if (!candidates.length) return { branch: def, hits, notChecked: null };
   const ids = new Set(candidates.map((t) => t.id));
   const since = sinceDate(candidates);
   const out = tryGit(['log', def.ref, ...(since ? [`--since=${since} 00:00:00`] : []), '--format=%H%x09%ct%x09%s'], cwd, { timeout: GIT_TIMEOUT_MS });
   if (out === null) {
-    return { branch: def, hits, notChecked: problem('Merge not checked', `git log ${def.ref} failed or took longer than ${GIT_TIMEOUT_MS / 1000} s`, 'git fetch origin, then pm reconcile') };
+    const cause = `git log ${def.ref} failed or took longer than ${GIT_TIMEOUT_MS / 1000} s`;
+    return { branch: def, hits, cause, notChecked: problem('Merge not checked', cause, 'git fetch origin, then pm reconcile') };
   }
   for (const line of out.split('\n')) {
     const [sha, ct, ...rest] = line.split('\t');
@@ -197,5 +198,69 @@ export function refreshInBackground(pm, cwd, { now = Date.now(), spawnFn = spawn
   const lock = lockFile(pm);
   if (fs.existsSync(lock) && !lockStale(lock, now)) return false;
   spawnFn(process.execPath, [PM_SCRIPT, '_merge-check', pm], { cwd, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  return true;
+}
+
+// --- what closes by itself, what is only asked ---
+
+export const autoCloseEnabled = (cwd) => tryGit(['config', '--get', 'pm.autoClose'], cwd) !== 'false';
+
+const prLabel = (url) => {
+  const n = parsePrUrl(url ?? '')?.number;
+  return n ? `#${n}` : null;
+};
+const unixOf = (iso) => (iso ? Math.floor(Date.parse(iso) / 1000) : NaN);
+const snapshot = (t) => ({ status: t.data.status, pr: t.data.pr ?? '', review_at: t.data.review_at ?? '' });
+
+// Sorts open tasks by what the merge signals say. Pure over its inputs: `local` = subjectHits(), the forge cache.
+//   close      — review tasks whose own merge came at or after `pm done` (pm.autoClose=false moves them to ask)
+//   ask        — every other merge hit: shown, never closed without the user
+//   conflicts  — the task's PR comes from another branch than the task's: never closed
+//   awaiting   — review tasks checked and not merged yet, with days since review_at
+//   notChecked — review tasks nobody could check, with the reason
+// Each item: { id, how, sha, pr, at, snapshot } (snapshot = what the task looked like, re-checked before a write).
+export function classify({ tasks, local, cache, autoClose = true, now = Date.now() }) {
+  const { hits: subject, branch } = local;
+  const out = { close: [], ask: [], conflicts: [], awaiting: [], notChecked: [] };
+  for (const t of mergeCandidates(tasks)) {
+    const entry = cachedLookup(cache, t);
+    const conflict = Boolean(t.data.pr && t.data.branch && entry?.head && entry.head !== t.data.branch);
+    if (conflict) {
+      out.conflicts.push({ id: t.id, pr: t.data.pr, prBranch: entry.head, branch: t.data.branch });
+    }
+    const forge = !conflict && entry?.state === 'merged' && branch && entry.base === branch.branch
+      ? { how: 'forge', sha: entry.mergeSha, pr: prLabel(entry.url), at: entry.mergedAt }
+      : null;
+    const byId = subject.get(t.id) ?? null;
+    const reviewAt = unixOf(t.data.review_at);
+    const own = t.data.status === 'review' && !conflict && [forge, byId].find((h) => h && h.at >= reviewAt);
+    if (own) {
+      (autoClose ? out.close : out.ask).push({ id: t.id, ...own, snapshot: snapshot(t) });
+      continue;
+    }
+    const hit = forge ?? byId;
+    // A review task whose only merge predates `pm done` (the first of two PRs) is still awaiting its own merge.
+    if (hit && t.data.status !== 'review') {
+      out.ask.push({ id: t.id, ...hit, snapshot: snapshot(t) });
+      continue;
+    }
+    if (t.data.status !== 'review') continue;
+    const days = Number.isFinite(reviewAt) ? Math.floor((now / 1000 - reviewAt) / 86_400) : 0;
+    const reason = entry?.lastError ?? (entry || !local.cause ? null : local.cause);
+    if (reason) out.notChecked.push({ id: t.id, reason, days });
+    else out.awaiting.push({ id: t.id, pr: prLabel(entry?.url ?? t.data.pr), days });
+  }
+  return out;
+}
+
+// Closes one merged task, unless it changed since it was classified (status, pr or review_at). true when written.
+export function closeMerged(pm, item, { date, note }) {
+  const task = readTask(pm, item.id);
+  const now = snapshot(task);
+  if (Object.keys(now).some((k) => now[k] !== item.snapshot[k])) return false;
+  const fields = { status: 'done', merged_sha: item.sha ?? '', merged_how: item.how, merged_at: item.at ? new Date(item.at * 1000).toISOString() : '' };
+  setFields(pm, item.id, fields, date);
+  const what = [item.sha ? item.sha.slice(0, 7) : null, item.pr ? `(${item.pr})` : null].filter(Boolean).join(' ');
+  appendLogLine(pm, item.id, `- ${date} · pm · merged ${what || 'on the default branch'}, ${note}`, date);
   return true;
 }

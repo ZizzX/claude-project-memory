@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { setup, tmp, sh } from './helpers.mjs';
-import { subjectIds, sinceDate, subjectHits, originHeadHint, problem, mergeCandidates, acquireLock, runMergeCheck, refreshInBackground, cachedLookup, fetchCommand, CACHE, LOCK_STALE_MS, BACKOFF_MS, REFRESH_AFTER_MS, BACKGROUND_LOOKUPS, GIT_TIMEOUT_MS } from '../scripts/lib/merged.mjs';
+import { subjectIds, sinceDate, subjectHits, originHeadHint, problem, mergeCandidates, acquireLock, runMergeCheck, refreshInBackground, cachedLookup, fetchCommand, classify, closeMerged, CACHE, LOCK_STALE_MS, BACKOFF_MS, REFRESH_AFTER_MS, BACKGROUND_LOOKUPS, GIT_TIMEOUT_MS } from '../scripts/lib/merged.mjs';
 import { newTask, setFields, listTasks } from '../scripts/lib/tasks.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
 
@@ -212,4 +212,89 @@ test('writeState: an interrupted write (temp left, no rename) keeps the previous
   fs.writeFileSync(path.join(pm, '.state', `${CACHE}.json.999.tmp`), '{"checked');
   assert.deepEqual(readState(pm, CACHE), { checkedAt: 1 });
   assert.deepEqual(fs.readdirSync(path.join(pm, '.state')).filter((f) => f.endsWith('.tmp') && !f.includes('.999.')), [], 'a completed write leaves no temp file');
+});
+
+// --- closing rules ---
+
+const REVIEW_AT = '2026-09-20T10:00:00.000Z';
+const T = (iso) => Date.parse(iso) / 1000;
+const master = { remote: 'origin', branch: 'master', ref: 'origin/master', guessed: false };
+const local = (hits = {}, cause) => ({ branch: master, hits: new Map(Object.entries(hits)), cause });
+const merged = (key, at, extra = {}) => ({ key, checkedAt: 1, state: 'merged', url: key.startsWith('branch:') ? 'https://github.com/o/r/pull/15' : key, base: 'master', head: 'feat/x', mergeSha: 'f00dbeef1234', mergedAt: T(at), lastError: null, ...extra });
+const review = (id, data = {}) => mk(id, { status: 'review', review_at: REVIEW_AT, branch: 'feat/x', ...data });
+const ids = (list) => list.map((x) => x.id);
+
+test('classify: review + own PR merged after pm done closes; autoClose=false asks instead', () => {
+  const tasks = [review('T-001', { pr: 'https://github.com/o/r/pull/15' })];
+  const cache = { tasks: { 'T-001': merged('https://github.com/o/r/pull/15', '2026-09-21T09:00:00Z') } };
+  const out = classify({ tasks, local: local(), cache });
+  assert.deepEqual(out.close.map(({ snapshot, ...x }) => x), [{ id: 'T-001', how: 'forge', sha: 'f00dbeef1234', pr: '#15', at: T('2026-09-21T09:00:00Z') }]);
+  assert.deepEqual(out.close[0].snapshot, { status: 'review', pr: 'https://github.com/o/r/pull/15', review_at: REVIEW_AT });
+  const off = classify({ tasks, local: local(), cache, autoClose: false });
+  assert.deepEqual([ids(off.close), ids(off.ask)], [[], ['T-001']]);
+});
+
+test('classify: a subject hit at or after review_at closes; one before it (the first of two PRs) keeps review', () => {
+  const after = classify({ tasks: [review('T-001')], local: local({ 'T-001': { how: 'subject', sha: 'a1', at: T(REVIEW_AT), pr: '#16' } }), cache: {} });
+  assert.deepEqual(ids(after.close), ['T-001']);
+  const before = classify({ tasks: [review('T-001')], local: local({ 'T-001': { how: 'subject', sha: 'a0', at: T('2026-09-19T10:00:00Z'), pr: '#14' } }), cache: {} });
+  assert.deepEqual([ids(before.close), ids(before.ask), ids(before.awaiting)], [[], [], ['T-001']]);
+});
+
+test('classify: a forge merge before review_at, through the cache, keeps review', () => {
+  const cache = { tasks: { 'T-001': merged('branch:feat/x', '2026-09-19T10:00:00Z') } };
+  const out = classify({ tasks: [review('T-001')], local: local(), cache });
+  assert.deepEqual([ids(out.close), ids(out.ask), ids(out.awaiting)], [[], [], ['T-001']]);
+});
+
+test('classify: open tasks that are not review are asked about, never closed', () => {
+  const tasks = ['todo', 'in_progress', 'waiting'].map((status, i) => mk(`T-00${i + 1}`, { status }));
+  const hits = Object.fromEntries(tasks.map((t) => [t.id, { how: 'subject', sha: 'a1', at: T('2026-09-21T10:00:00Z'), pr: null }]));
+  const out = classify({ tasks, local: local(hits), cache: {} });
+  assert.deepEqual([ids(out.close), ids(out.ask)], [[], ['T-001', 'T-002', 'T-003']]);
+});
+
+test('classify: a pr from another branch is a conflict, never closed; a merge into another base does not count', () => {
+  const wrong = review('T-001', { pr: 'https://github.com/o/r/pull/7' });
+  const cacheWrong = { tasks: { 'T-001': merged('https://github.com/o/r/pull/7', '2026-09-21T09:00:00Z', { head: 'feat/other' }) } };
+  const c = classify({ tasks: [wrong], local: local(), cache: cacheWrong });
+  assert.deepEqual(c.conflicts, [{ id: 'T-001', pr: 'https://github.com/o/r/pull/7', prBranch: 'feat/other', branch: 'feat/x' }]);
+  assert.deepEqual([ids(c.close), ids(c.ask)], [[], []]);
+  const cacheBase = { tasks: { 'T-001': merged('branch:feat/x', '2026-09-21T09:00:00Z', { base: 'release' }) } };
+  const b = classify({ tasks: [review('T-001')], local: local(), cache: cacheBase });
+  assert.deepEqual([ids(b.close), ids(b.ask)], [[], []]);
+});
+
+test('classify: awaiting merge (checked) vs merge not checked (with the reason)', () => {
+  const now = Date.parse('2026-09-30T10:00:00Z');
+  const tasks = [review('T-001'), review('T-002', { branch: 'feat/y' }), review('T-003', { branch: 'feat/z' })];
+  const cache = { tasks: {
+    'T-001': { key: 'branch:feat/x', checkedAt: 1, state: 'open', url: 'https://github.com/o/r/pull/15', lastError: null },
+    'T-002': { key: 'branch:feat/y', checkedAt: 1, state: null, lastError: 'gh is not installed' },
+  } };
+  const out = classify({ tasks, local: local({}, 'origin has no default branch here'), cache, now });
+  assert.deepEqual(out.awaiting, [{ id: 'T-001', pr: '#15', days: 10 }]);
+  assert.deepEqual(out.notChecked, [{ id: 'T-002', reason: 'gh is not installed', days: 10 }, { id: 'T-003', reason: 'origin has no default branch here', days: 10 }]);
+});
+
+test('closeMerged: writes done with the merge and a Log line; skips a task changed since the check', () => {
+  const pm = tmp();
+  newTask(pm, { title: 'a', date: '2026-09-12' });
+  newTask(pm, { title: 'b', date: '2026-09-12' });
+  for (const id of ['T-001', 'T-002']) setFields(pm, id, { status: 'review', review_at: REVIEW_AT, pr: 'https://github.com/o/r/pull/15' }, '2026-09-20');
+  const [a, b] = listTasks(pm);
+  const [ca, cb] = classify({ tasks: [a, b], local: local(), cache: { tasks: {
+    'T-001': merged('https://github.com/o/r/pull/15', '2026-09-21T09:00:00Z', { head: null }),
+    'T-002': merged('https://github.com/o/r/pull/15', '2026-09-21T09:00:00Z', { head: null }),
+  } } }).close;
+  setFields(pm, 'T-002', { status: 'in_progress' }, '2026-09-21'); // someone reopened it in between
+  assert.equal(closeMerged(pm, ca, { date: '2026-09-22', note: 'closed automatically' }), true);
+  assert.equal(closeMerged(pm, cb, { date: '2026-09-22', note: 'closed automatically' }), false);
+  const done = listTasks(pm)[0];
+  assert.equal(done.data.status, 'done');
+  assert.equal(done.data.merged_sha, 'f00dbeef1234');
+  assert.equal(done.data.merged_how, 'forge');
+  assert.equal(done.data.merged_at, '2026-09-21T09:00:00.000Z');
+  assert.match(done.body, /- 2026-09-22 · pm · merged f00dbee \(#15\), closed automatically\n$/);
+  assert.equal(listTasks(pm)[1].data.status, 'in_progress');
 });
