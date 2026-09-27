@@ -39,7 +39,7 @@ test('model: columns, archive, epics, focus and decisions from one snapshot', ()
   assert.equal(m.hasEpics, true);
   assert.deepEqual(m.focus, ['A: ship A']);
   assert.deepEqual(Object.fromEntries(m.columns.map((c) => [c.key, c.cards.map((x) => x.id)])), {
-    todo: [], ready: ['T-003'], in_progress: ['T-002'], waiting: [], done: ['T-001'],
+    todo: [], ready: ['T-003'], in_progress: ['T-002'], waiting: [], review: [], done: ['T-001'],
   });
   assert.deepEqual(m.archive.done, []);
   assert.deepEqual(m.archive.epics.map((e) => [e.epic, e.updated, e.cards.map((c) => c.id)]), [['B', '2026-09-15', ['T-004']]], 'a closed epic keeps its done cards, not the dropped one');
@@ -124,6 +124,11 @@ test('html: header, expandable cards, dependency links, decisions and epic lanes
   // On a phone the work in hand comes before the backlog.
   assert.match(h, /@media \(max-width:720px\)\{[^}]*\}[^@]*\.col\[data-col=in_progress\]\{order:-1\}\.col\[data-col=todo\]\{order:1\}/);
   assert.match(h, /<details class="card" id="T-002" data-epic="A" data-col="in_progress"><summary><b>T-002<\/b>/);
+  // Six status columns on a wide screen, one on a phone.
+  assert.match(h, /\.board\{display:grid;grid-template-columns:repeat\(6,/);
+  assert.match(h, /@media \(max-width:720px\)\{[^@]*\.board\{grid-template-columns:1fr\}/);
+  assert.match(h, /<details class="col" open data-col="review"><summary><h2>Awaiting merge · 0<\/h2>/);
+  assert.match(h, /\.col\[data-col=review\] h2\{color:var\(--accent\)\}/);
   assert.match(h, /<h3>Goal<\/h3><div class="text">goal text<\/div><h3>Understanding<\/h3><div class="text">line 1\nline 2<\/div>/);
   assert.match(h, /<h3>Log · last 3<\/h3>/);
   assert.match(h, /after <a href="#T-001">T-001<\/a>, <a href="#T-004">T-004<\/a>/, 'an archived card is a link too');

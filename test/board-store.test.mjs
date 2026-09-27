@@ -24,9 +24,11 @@ test('board puts every non-dropped task in its column', () => {
   setFields(pm, 'T-005', { status: 'waiting', waiting_on: 'user' }, D);
   newTask(pm, { title: 'dropped one', date: D });
   setFields(pm, 'T-006', { status: 'dropped' }, D);
+  newTask(pm, { title: 'merge me', date: D });
+  setFields(pm, 'T-007', { status: 'review', review_at: '2026-09-12T10:00:00.000Z', pr: 'https://github.com/o/r/pull/7' }, D);
 
   const ids = Object.fromEntries(Object.entries(columns(listTasks(pm))).map(([k, v]) => [k, v.map((t) => t.id)]));
-  assert.deepEqual(ids, { todo: ['T-003'], ready: ['T-002'], in_progress: ['T-004'], waiting: ['T-005'], done: ['T-001'] });
+  assert.deepEqual(ids, { todo: ['T-003'], ready: ['T-002'], in_progress: ['T-004'], waiting: ['T-005'], review: ['T-007'], done: ['T-001'] });
 
   writeBoard(pm);
   const md = fs.readFileSync(path.join(pm, 'BOARD.md'), 'utf8');
@@ -34,7 +36,9 @@ test('board puts every non-dropped task in its column', () => {
   assert.match(md, /- \*\*T-004\*\* active <one> · @ wt-a · next: b/);
   assert.match(md, /waiting: user/);
   assert.doesNotMatch(md, /T-006/);
+  assert.match(md, /## Awaiting merge \(1\)\n- \*\*T-007\*\* merge me/);
   const html = fs.readFileSync(path.join(pm, 'board.html'), 'utf8');
+  assert.match(html, /<details class="card" id="T-007" data-epic="" data-col="review">/);
   assert.match(html, /active &lt;one&gt;/);
   assert.match(html, /http-equiv="refresh"/);
   assert.doesNotMatch(html, /dropped one/);
