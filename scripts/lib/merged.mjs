@@ -264,3 +264,53 @@ export function closeMerged(pm, item, { date, note }) {
   appendLogLine(pm, item.id, `- ${date} · pm · merged ${what || 'on the default branch'}, ${note}`, date);
   return true;
 }
+
+// --- pm reconcile: the same work in the foreground, every candidate, with the lists printed ---
+
+export const AWAITING_DAYS = 7;
+
+const mergeLabel = (hit, branch) => hit.pr ?? `${branch?.branch ?? 'default branch'} ${String(hit.sha ?? '').slice(0, 7)}`.trim();
+
+function notCheckedFix(id, reason) {
+  const cli = reason.match(/^(gh|glab) /)?.[1];
+  if (/is not installed/.test(reason)) return `install ${cli}, run ${cli} auth login, then pm reconcile`;
+  if (/not logged in/.test(reason)) return `${cli} auth login, then pm reconcile`;
+  if (/unknown PR URL|not found on the forge/.test(reason)) return `pm set ${id} pr=<the GitHub PR or GitLab MR url>`;
+  return 'pm reconcile again when online';
+}
+
+// Checks every open task, closes what may close by itself (and with yes, what was asked), returns the lines to
+// print and the closed ids. Never throws on git or forge failures: they become "problem — cause — fix" lines.
+export function reconcile({ pm, cwd, yes = false, fetch = true, date, now = Date.now() }) {
+  const lines = [];
+  const run = runMergeCheck({ pm, cwd, fetch, now });
+  if (run.busy) lines.push(problem('Forge not checked now', 'a background merge check is running', 'pm reconcile again in a minute'));
+  else lines.push(`checked ${run.checked} of ${run.total} tasks with a PR or branch`);
+  const tasks = listTasks(pm);
+  const local = subjectHits(cwd, tasks);
+  const cache = readState(pm, CACHE);
+  const hint = originHeadHint(pm, local.branch);
+  if (hint) lines.push(hint);
+  if (cache.fetchError) lines.push(cache.fetchError);
+  if (local.notChecked) lines.push(local.notChecked);
+  const out = classify({ tasks, local, cache, autoClose: autoCloseEnabled(cwd), now });
+  const closed = [];
+  const close = (items, note) => {
+    for (const item of items) {
+      if (closeMerged(pm, item, { date, note })) closed.push(`${item.id} (${mergeLabel(item, local.branch)})`);
+    }
+  };
+  close(out.close, 'closed automatically');
+  if (yes) close(out.ask, 'closed by pm reconcile --yes');
+  if (closed.length) lines.push(`Closed: ${closed.join(', ')}`);
+  if (!yes && out.ask.length) {
+    lines.push(`Merged, still open: ${out.ask.map((a) => `${a.id} (${mergeLabel(a, local.branch)})`).join(', ')} — close them: pm reconcile --yes, or one by one: pm set <id> status=done`);
+  }
+  for (const c of out.conflicts) {
+    lines.push(problem(`PR conflict: ${c.id}`, `pr ${c.pr} comes from branch ${c.prBranch}, the task's branch is ${c.branch}`, `pm set ${c.id} pr=<the PR of ${c.branch}>`));
+  }
+  for (const a of out.awaiting.filter((x) => x.days >= AWAITING_DAYS)) lines.push(`Awaiting merge ${a.days} days: ${a.id}${a.pr ? ` (${a.pr})` : ''}`);
+  for (const n of out.notChecked) lines.push(problem(`Merge not checked: ${n.id}`, n.reason, notCheckedFix(n.id, n.reason)));
+  if (lines.length === 1) lines.push(`Nothing merged among ${mergeCandidates(tasks).length} open tasks.`);
+  return { lines, closed: closed.map((c) => c.split(' ')[0]) };
+}

@@ -17,6 +17,9 @@ function prLine(pr) {
   return parts.join(' · ');
 }
 
+// The board commit of merged tasks closed by pm reconcile or at session start: "pm: reconcile closed T-001, T-002".
+export const CLOSED_PREFIX = 'pm: reconcile closed ';
+
 // Board history of one task from pm commit subjects ("<unix>\t<author>\t<subject>"), oldest first.
 // A run of the same label keeps its first event: re-claims and repeated statuses add nothing to read.
 export function timelineEvents(lines, id) {
@@ -31,7 +34,8 @@ export function timelineEvents(lines, id) {
     const subject = rest.join('\t');
     const label = subject === `pm: task new ${id}` ? 'created'
       : subject === `pm: claim ${id}` ? 'claimed'
-        : subject.startsWith(setPrefix) ? statusOf(subject.slice(setPrefix.length)) : undefined;
+        : subject.startsWith(setPrefix) ? statusOf(subject.slice(setPrefix.length))
+          : subject.startsWith(CLOSED_PREFIX) && subject.slice(CLOSED_PREFIX.length).split(', ').includes(id) ? 'done' : undefined;
     if (label && events.at(-1)?.label !== label) events.push({ label, at: Number(at), author });
   }
   return events;

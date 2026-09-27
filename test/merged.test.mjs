@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { setup, tmp, sh } from './helpers.mjs';
+import { setup, tmp, sh, cli } from './helpers.mjs';
+import { pmDir } from '../scripts/lib/paths.mjs';
 import { subjectIds, sinceDate, subjectHits, originHeadHint, problem, mergeCandidates, acquireLock, runMergeCheck, refreshInBackground, cachedLookup, fetchCommand, classify, closeMerged, CACHE, LOCK_STALE_MS, BACKOFF_MS, REFRESH_AFTER_MS, BACKGROUND_LOOKUPS, GIT_TIMEOUT_MS } from '../scripts/lib/merged.mjs';
 import { newTask, setFields, listTasks } from '../scripts/lib/tasks.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
@@ -297,4 +298,43 @@ test('closeMerged: writes done with the merge and a Log line; skips a task chang
   assert.equal(done.data.merged_at, '2026-09-21T09:00:00.000Z');
   assert.match(done.body, /- 2026-09-22 · pm · merged f00dbee \(#15\), closed automatically\n$/);
   assert.equal(listTasks(pm)[1].data.status, 'in_progress');
+});
+
+// --- pm reconcile end to end ---
+
+test('cli: pm reconcile closes the awaiting-merge task, asks about the rest, --yes closes them; failures say problem, cause, fix', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  for (const title of ['a', 'b', 'c']) cli(['task', 'new', '--title', title], root);
+  cli(['claim', 'T-002'], root);
+  cli(['set', 'T-001', 'status=review', 'review_at=2026-01-01T00:00:00.000Z'], root);
+  cli(['set', 'T-003', 'status=review', 'review_at=2026-01-01T00:00:00.000Z', 'pr=https://github.com/o/r/pull/9'], root);
+  const now = new Date().toISOString();
+  commit(root, 'feat(T-001): part a (#15)', now);
+  const b = commit(root, 'fix(T-002): part b', now);
+  publish(root);
+  const fixture = path.join(tmp(), 'forge.json');
+  fs.writeFileSync(fixture, JSON.stringify({ 'repos/o/r/pulls/9': { $error: 'gh is not installed', permanent: true } }));
+  const env = { PM_FORGE_FIXTURE: fixture };
+
+  const first = cli(['reconcile', '--no-fetch'], root, { env });
+  assert.equal(first.code, 0, first.err);
+  const lines = first.out.split('\n');
+  assert.equal(lines[0], 'checked 1 of 1 tasks with a PR or branch');
+  assert.match(first.out, /origin\/HEAD is not set, so origin\/master is assumed .+ — fix: git remote set-head origin -a/);
+  assert.match(first.out, /^Closed: T-001 \(#15\)$/m);
+  assert.match(first.out, new RegExp(`^Merged, still open: T-002 \\(master ${b.slice(0, 7)}\\) — close them: pm reconcile --yes`, 'm'));
+  assert.match(first.out, /^Merge not checked: T-003 — gh is not installed — fix: install gh, run gh auth login, then pm reconcile$/m);
+  assert.doesNotMatch(first.out, /T-002 \(.*\).*Closed/);
+
+  const second = cli(['reconcile', '--no-fetch', '--yes'], root, { env });
+  assert.match(second.out, new RegExp(`^Closed: T-002 \\(master ${b.slice(0, 7)}\\)$`, 'm'));
+  assert.doesNotMatch(second.out, /origin\/HEAD is not set/, 'the hint is shown once per repo');
+  const show = cli(['show', 'T-002'], root).out;
+  assert.match(show, /· done$/m);
+  assert.match(show, /timeline: created .+ · claimed .+ · done /);
+  assert.match(sh(['log', '--format=%s', '-3'], pmDir(root)), /pm: reconcile closed T-002/);
+  const t2 = fs.readFileSync(path.join(pmDir(root), 'tasks', 'T-002.md'), 'utf8');
+  assert.match(t2, /merged_how: subject/);
+  assert.match(t2, /· pm · merged [0-9a-f]{7}, closed by pm reconcile --yes\n$/);
 });

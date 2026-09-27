@@ -8,7 +8,7 @@ import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
 import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
-import { showTask } from './lib/show.mjs';
+import { showTask, CLOSED_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
@@ -17,7 +17,7 @@ import { scanPlans } from './lib/scan.mjs';
 import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
-import { runMergeCheck, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
+import { runMergeCheck, reconcile, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
 import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -32,6 +32,7 @@ const USAGE = `usage: pm <command>
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
   prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids stay as they are
+  reconcile [--yes] [--no-fetch]               find merged tasks: close awaiting-merge ones, list the rest (--yes closes them)
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -263,6 +264,14 @@ Re-run with --yes to proceed.`;
   _push(cwd, [pm]) {
     pushNow(pm);
     return '';
+  },
+
+  reconcile(cwd, args) {
+    const { values } = parseArgs({ args, options: { yes: { type: 'boolean' }, 'no-fetch': { type: 'boolean' } } });
+    const pm = requireBoard(cwd);
+    const { lines, closed } = reconcile({ pm, cwd, yes: Boolean(values.yes), fetch: !values['no-fetch'], date: today() });
+    if (closed.length) persist(pm, `${CLOSED_PREFIX}${closed.join(', ')}`);
+    return lines.join('\n');
   },
 
   // Background merge check: spawned by SessionStart when the cache is stale, never run by a person.
