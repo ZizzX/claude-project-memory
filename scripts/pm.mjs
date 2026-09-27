@@ -24,7 +24,7 @@ const USAGE = `usage: pm <command>
   init                                         create the local board for this repo
   task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
   set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, pr, ...)
-  claim <id>                                   attach this worktree and set in_progress
+  claim <id>                                   attach this worktree and set in_progress (a review task keeps review)
   log <id> --did "..." --next "..."            append a work log entry
   show <id>                                    task history: branch, pr, timeline, commits, decisions, dependents
   decision --title T --why W --rejected R [--tasks T-001,T-002]

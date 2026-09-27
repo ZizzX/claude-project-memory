@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse, serialize } from './frontmatter.mjs';
 
-export const STATUSES = ['todo', 'in_progress', 'waiting', 'done', 'dropped'];
+// review: finished and verified, only the merge is left; not Ready and does not satisfy depends_on.
+export const STATUSES = ['todo', 'in_progress', 'waiting', 'review', 'done', 'dropped'];
 // Any prefix is read, so tasks created before `pm prefix` keep their T-NNN ids next to the new ones.
 const ID_RE = /^[A-Z][A-Z0-9]*-(\d+)\.md$/;
 const PREFIX_RE = /^[A-Z][A-Z0-9]{0,9}$/;
@@ -139,6 +140,7 @@ export function setFields(pm, id, fields, date) {
     }
   }
   if ('status' in fields && fields.status !== 'waiting' && !('waiting_on' in fields)) task.data.waiting_on = '';
+  if ('status' in fields && fields.status !== 'review' && !('review_at' in fields)) delete task.data.review_at;
   if (task.data.status === 'waiting' && !task.data.waiting_on) {
     throw new Error('status waiting needs waiting_on="<what we are waiting for>"');
   }
@@ -150,6 +152,8 @@ export function setFields(pm, id, fields, date) {
 export function claim(pm, id, worktree, date, branch = '') {
   const task = readTask(pm, id);
   const worktrees = [...new Set([...task.data.worktrees, worktree])];
+  // A task awaiting merge keeps its status, branch, pr and review_at; continuing work is `pm set <id> status=in_progress`.
+  if (task.data.status === 'review') return setFields(pm, id, { worktrees }, date);
   return setFields(pm, id, { status: 'in_progress', worktrees, ...(branch && { branch }) }, date);
 }
 

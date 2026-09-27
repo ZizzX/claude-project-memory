@@ -21,8 +21,10 @@ test('ready = todo whose deps are done or dropped, in order', () => {
     mk('T-006', { status: 'waiting', waiting_on: 'x' }),
     mk('T-007', { order: 1 }),
     mk('T-008', { depends_on: ['T-404'] }),
+    mk('T-009', { status: 'review' }),
+    mk('T-010', { depends_on: ['T-009'] }),
   ];
-  assert.deepEqual(readyQueue(tasks).map((t) => t.id), ['T-007', 'T-003']);
+  assert.deepEqual(readyQueue(tasks).map((t) => t.id), ['T-007', 'T-003'], 'review is not Ready and does not satisfy depends_on');
 });
 
 test('validate reports every kind of problem', () => {
@@ -49,5 +51,5 @@ test('validate reports every kind of problem', () => {
 });
 
 test('a healthy board has no problems', () => {
-  assert.deepEqual(validate([mk('T-001'), mk('T-002', { depends_on: ['T-001'] })]), []);
+  assert.deepEqual(validate([mk('T-001'), mk('T-002', { depends_on: ['T-001'] }), mk('T-003', { status: 'review' })]), []);
 });
