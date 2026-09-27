@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { setup, tmp, sh, cli } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
+import { onSessionStart } from '../scripts/lib/hooks.mjs';
 import { subjectIds, sinceDate, subjectHits, originHeadHint, problem, mergeCandidates, acquireLock, runMergeCheck, refreshInBackground, cachedLookup, fetchCommand, classify, closeMerged, CACHE, LOCK_STALE_MS, BACKOFF_MS, REFRESH_AFTER_MS, BACKGROUND_LOOKUPS, GIT_TIMEOUT_MS } from '../scripts/lib/merged.mjs';
 import { newTask, setFields, listTasks } from '../scripts/lib/tasks.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
@@ -414,4 +415,34 @@ test('pm done --no-merge forces done; pm.autoClose=false says reconcile will ask
   commit(b.root, 'feat(T-001): part a', new Date().toISOString());
   sh(['config', 'pm.autoClose', 'false'], b.root);
   assert.match(cli(['done', 'T-001', '--did', 'x'], b.root).out, /^T-001 → review: 1 commit, no PR found; pm reconcile asks to close it after the merge \(pm.autoClose is false\)$/);
+});
+
+// --- session start and pm show ---
+
+test('session start closes a review task from the cache with no forge call, lists the rest, commits the board', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  for (const title of ['a', 'b', 'c']) cli(['task', 'new', '--title', title], root);
+  cli(['claim', 'T-002'], root);
+  cli(['set', 'T-001', 'status=review', 'review_at=2026-09-20T10:00:00.000Z', 'pr=https://github.com/o/r/pull/15'], root);
+  cli(['set', 'T-003', 'status=review', 'review_at=2026-09-20T10:00:00.000Z', 'pr=https://github.com/o/r/pull/16'], root);
+  commit(root, 'fix(T-002): part b', new Date().toISOString());
+  publish(root);
+  const pm = pmDir(root);
+  writeState(pm, CACHE, { checkedAt: 42, tasks: {
+    'T-001': merged('https://github.com/o/r/pull/15', '2026-09-21T09:00:00Z', { head: null }),
+    'T-003': { key: 'https://github.com/o/r/pull/16', checkedAt: 42, state: 'open', url: 'https://github.com/o/r/pull/16', lastError: null },
+  } });
+  const out = onSessionStart({ session_id: 's1' }, root);
+  assert.match(out, /^Closed after merge: T-001 \(#15\)$/m);
+  assert.match(out, /^Awaiting merge: T-003 \(#16\)$/m);
+  assert.match(out, /^Merged, still open: T-002 \(master [0-9a-f]{7}\) — ask the user, then pm reconcile --yes/m);
+  assert.equal(readState(pm, CACHE).checkedAt, 42, 'no merge check ran in the session start');
+  assert.match(sh(['log', '--format=%s', '-1'], pm), /^pm: reconcile closed T-001$/);
+  assert.match(fs.readFileSync(path.join(pm, 'BOARD.md'), 'utf8'), /T-001/);
+  const show = cli(['show', 'T-001'], root).out;
+  assert.match(show, /^merged: f00dbeef1234 \(forge\), 2026-09-21 \d\d:\d\d$/m);
+  assert.match(show, /· review .+ · done /);
+  const again = onSessionStart({ session_id: 's2' }, root);
+  assert.doesNotMatch(again, /Closed after merge/, 'closed once');
 });

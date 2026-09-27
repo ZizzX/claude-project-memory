@@ -359,3 +359,21 @@ export function markDone({ pm, cwd, id, did, pr, noMerge = false, worktree, date
     : 'pm reconcile asks to close it after the merge (pm.autoClose is false)';
   return finish('review', fields, `${why}; ${after}`, `merge ${label ?? 'the commits'} into the default branch`);
 }
+
+// --- session start: local refs and the cache only, never the network ---
+
+// Closes the review tasks whose own merge is already known, starts a background refresh when the cache is stale,
+// and returns the summary's merge lines. The caller commits the board when `closedIds` is not empty.
+export function mergeAtStart({ pm, cwd, tasks, date, now = Date.now() }) {
+  const local = subjectHits(cwd, tasks);
+  const out = classify({ tasks, local, cache: readState(pm, CACHE), autoClose: autoCloseEnabled(cwd), now });
+  const closed = out.close.filter((item) => closeMerged(pm, item, { date, note: 'closed automatically' }));
+  refreshInBackground(pm, cwd, { now });
+  const label = (x) => `${x.id} (${mergeLabel(x, local.branch)})`;
+  return {
+    closedIds: closed.map((x) => x.id),
+    closed: closed.map(label),
+    ask: out.ask.map(label),
+    conflicts: out.conflicts.map((c) => c.id),
+  };
+}

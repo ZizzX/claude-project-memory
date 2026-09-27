@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { listTasks, readyQueue, lastNext, isOpen, byEpic, activeEpic } from './tasks.mjs';
 import { recentDecisions } from './decisions.mjs';
 import { projectName, currentFocus } from './plan.mjs';
+import { parsePrUrl } from './forge.mjs';
 
 export const MAX_LINES = 40;
 export const RULES = [
@@ -17,7 +18,8 @@ const firstPerEpic = (list) => {
   return list.filter((t) => !seen.has(t.data.epic) && seen.add(t.data.epic));
 };
 
-export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks = listTasks(pm) }) {
+// merge: what SessionStart learned from local refs and the merge cache (mergeAtStart), or null.
+export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks = listTasks(pm), merge = null }) {
   const keys = new Set(tasks.map((t) => t.data.epic).filter(Boolean));
   const epic = activeEpic(tasks, worktree);
   const epics = [...new Set(tasks.filter(isOpen).map((t) => t.data.epic).filter(Boolean))];
@@ -33,6 +35,7 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   const keep = new Set([...scope.map((t) => t.id), ...scope.flatMap((t) => t.data.depends_on)]);
   const blocked = tasks.filter((t) => t.data.status === 'waiting' && keep.has(t.id));
   const waiting = (epic || !epics.length ? blocked : firstPerEpic(blocked)).slice(0, 5);
+  const awaiting = byEpic(tasks, epic).filter((t) => t.data.status === 'review').slice(0, 5);
   const decisions = recentDecisions(pm, 3);
 
   const lines = [`[pm] ${projectName(pm)}${epic ? ` · epic ${epic}` : ''} · focus: ${currentFocus(pm, epic, keys) || '—'} · board: ${pathToFileURL(path.join(pm, 'board.html')).href}`];
@@ -46,6 +49,16 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   if (elsewhere.length) lines.push(`Elsewhere: ${elsewhere.map((t) => `${t.id} ${t.data.title} @ ${t.data.worktrees.join(', ')}`).join(' · ')}`);
   lines.push(`Ready: ${ready.map((t) => `${t.id} ${t.data.title}${tag(t, epic)}`).join(' · ') || '—'}${others ? ` · +${others} in other epics (pm ready --all)` : ''}`);
   if (waiting.length) lines.push(`Waiting: ${waiting.map((t) => `${t.id}${tag(t, epic)} ← ${t.data.waiting_on}`).join(' · ')}`);
+  if (merge?.closed.length) lines.push(`Closed after merge: ${merge.closed.join(', ')}`);
+  if (awaiting.length) {
+    const pr = (t) => {
+      const n = parsePrUrl(t.data.pr ?? '')?.number;
+      return n ? ` (#${n})` : '';
+    };
+    lines.push(`Awaiting merge: ${awaiting.map((t) => `${t.id}${pr(t)}${tag(t, epic)}`).join(' · ')}`);
+  }
+  if (merge?.ask.length) lines.push(`Merged, still open: ${merge.ask.join(', ')} — ask the user, then pm reconcile --yes (or pm set <id> status=done)`);
+  if (merge?.conflicts.length) lines.push(`PR conflict: ${merge.conflicts.join(', ')} — details: pm reconcile`);
   if (epics.length) {
     const of = (e) => tasks.filter((t) => t.data.epic === e && t.data.status !== 'dropped');
     lines.push(`Epics: ${epics.map((e) => `${e} ${of(e).filter(isOpen).length}/${of(e).length}`).join(' · ')}`);

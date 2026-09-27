@@ -56,6 +56,10 @@ export function showTask(pm, cwd, id) {
   if (data.branch) lines.push(`branch: ${data.branch}`);
   const pr = prInfo(data, cwd);
   if (pr) lines.push(prLine(pr));
+  if (data.merged_how) {
+    const at = Date.parse(data.merged_at ?? '');
+    lines.push(`merged: ${data.merged_sha ? String(data.merged_sha).slice(0, 12) : 'sha unknown'} (${data.merged_how}), ${Number.isFinite(at) ? stamp(at / 1000) : 'date unknown'}`);
+  }
   const events = timelineEvents(boardHistory(pm, id), id);
   if (events.length) lines.push(`timeline: ${events.map((e) => `${e.label} ${stamp(e.at)} ${e.author}`).join(' · ')}`);
   const commits = describeCommits(cwd, data.commits ?? []);
