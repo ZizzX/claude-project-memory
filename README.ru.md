@@ -114,6 +114,7 @@ node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs alias
 | «запомни …» | Записывает ровно в одно место: решение, auto-memory или `## Understanding` задачи |
 | «ждём …» | `status=waiting` с причиной; задача уходит из Ready |
 | «закончили», «продолжим в новой сессии» | Пишет `did` / `next` во все активные задачи worktree, обновляет фокус |
+| `/done`, «готово, закрываем» | Сверяет разговор с критерием готовности и запускает `pm done`: задача `done` или ждёт мерджа и закрывается сама, когда он случится — см. [Завершение сессии](#завершение-сессии) |
 | «план меняется» | Правит `PLAN.md`, добавляет строку в Changelog, фиксирует решение |
 | «отмени правку доски», «откати» | Отменяет это изменение самой доски через git |
 | «откати код T-007», «удали изменения T-007» | Показывает блок `undo:` из `pm show T-007` вместе с рисками, ждёт вашего «да» и откатывает коммиты задачи в новой задаче отката, в ветке `revert/T-007` |
@@ -131,7 +132,7 @@ node ~/.claude/plugins/marketplaces/project-memory/scripts/pm.mjs alias
 читает его состояние, SHA слияния и автора, а блок отката нацеливается на merge-коммит, а не на отдельные коммиты.
 
 Английские фразы тоже работают: "what's next?", "take the next one", "break it down", "remember …",
-"we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that",
+"we're done", "done, only merge left", "continue in a new session", "the plan changes", "waiting for …", "undo that",
 "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "add the pm alias",
 "update the plugin", "later", "never", "update it yourself".
 
@@ -147,6 +148,8 @@ Your worktree (feature-csv):
 Elsewhere: T-008 Export to XLSX @ feature-export
 Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
+Awaiting merge: T-002 (#14)
+Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes (or pm set <id> status=done)
 Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
 CLI: node "…/scripts/pm.mjs" <command>
@@ -160,6 +163,10 @@ Rules: …
 | Elsewhere | задачи в работе в других worktree, их не брать |
 | Ready | задачи `todo`, у которых все зависимости выполнены, в эпике этого worktree |
 | Waiting | задачи, заблокированные чем-то вне доски, и чем именно |
+| Closed after merge | задачи в `review`, закрытые на этом старте сессии: их мердж уже виден |
+| Awaiting merge | задачи в `review`: готовы, остался только мердж |
+| Merged, still open | смёрженные задачи, которые не отметили готовыми: Claude спросит, прежде чем закрыть |
+| PR conflict | `pr` задачи открыт из другой ветки, чем у задачи; `pm reconcile` покажет, как исправить |
 | Epics | открыто / всего по каждому направлению |
 | Decisions | три последних решения |
 
@@ -216,6 +223,54 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 
 Если мелкий фикс ушёл во вторую сессию, заведите задачу тогда. Это дешевле, чем заводить заранее.
 
+## Завершение сессии
+
+Когда работа закончена, скажите `/done` (или «готово, закрываем»). Claude сначала сверяет разговор:
+чек-лист закрыт, проверка действительно прошла. Затем запускает `pm done`, и та печатает, что произошло:
+
+```
+$ pm done T-042 --did "сравнил два парсера, выбрал csv-parse"
+T-042 → done: no PR or commits, nothing to merge
+
+$ pm done T-041 --did "импорт CSV, тесты зелёные"
+T-041 → review: #15 not merged yet; closes by itself after the merge (git config pm.autoClose false turns that off)
+```
+
+Задача ждёт мерджа, если у неё есть `pr` или привязанные коммиты. `--pr <url>` сначала записывает PR,
+`--no-merge` закрывает сразу. Если что-то не доделано, Claude называет это, заводит остатки задачами и
+записывает точный следующий шаг.
+
+Задача в `review` закрывается сама, как только виден её собственный мердж: на одном из следующих стартов
+сессии или сразу через `pm reconcile`. Мердж виден двумя способами:
+
+- коммит в основной ветке, в заголовке которого есть задача: `feat(T-041): …` или `[T-041] …`
+  (текст коммита не считается);
+- forge: `gh` / `glab` сообщает, что PR задачи влит в основную ветку. Это идёт в фоне (не больше
+  5 запросов за прогон, никогда во время старта сессии) или сразу через `pm reconcile`.
+
+Мердж, случившийся до `pm done` (первый из двух PR), задачу не закрывает. Смёрженные задачи, которые не
+отметили готовыми, только перечисляются (`Merged, still open`), и Claude спрашивает, прежде чем их закрыть:
+
+```
+$ pm reconcile
+checked 3 of 3 tasks with a PR or branch
+Closed: T-041 (#15)
+Merged, still open: T-038 (#10) — close them: pm reconcile --yes, or one by one: pm set <id> status=done
+Merge not checked: T-044 — gh is not installed — fix: install gh, run gh auth login, then pm reconcile
+$ pm reconcile --yes
+```
+
+Каждая строка об ошибке говорит, что случилось, почему и какой командой это исправить.
+`git config pm.autoClose false` превращает любое автоматическое закрытие в вопрос. Если `origin/HEAD`
+не задан, основной веткой считается `main` или `master`, и `pm reconcile` один раз печатает исправление:
+`git remote set-head origin -a`.
+
+**Обновление.** Обновите все машины, которые делят доску: старая версия покажет `bad status "review"`
+в строке проблем доски и не выведет карточки `review` в `BOARD.md` и `board.html` (файлы задач
+останутся). Чтобы откатиться, сначала выполните `pm set T-NNN status=in_progress` для каждой задачи в
+`review`. После обновления один раз запустите `pm reconcile`: он найдёт задачи, смёрженные раньше, но так
+и не закрытые.
+
 ## Команды
 
 | Команда | Что делает |
@@ -223,8 +278,10 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 | `pm init` | Создать доску для этого репозитория |
 | `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b]` | Создать задачу. Без `--epic` берёт эпик этого worktree |
 | `pm set T-003 key=value …` | Изменить поля: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title`, `pr` (ссылка на MR/PR, которую читает `pm show`) |
-| `pm claim T-003` | Привязать задачу к этому worktree и поставить `in_progress` |
+| `pm claim T-003` | Привязать задачу к этому worktree и поставить `in_progress` (задача в `review` остаётся в `review`) |
 | `pm log T-003 --did "…" --next "…"` | Добавить запись в журнал работы |
+| `pm done T-003 [--did "…"] [--pr url \| --no-merge]` | Готово и проверено: `done` или `review`, пока её не закроет мердж. Печатает итог и причину |
+| `pm reconcile [--yes] [--no-fetch]` | Найти смёрженные задачи сейчас: закрывает задачи в `review`, перечисляет остальные (`--yes` закрывает и их), конфликты PR, задачи, ждущие мерджа 7+ дней, и те, что проверить не удалось |
 | `pm show T-003` | То, чего нет в файле задачи: ветка, состояние MR/PR, таймлайн, коммиты, решения, зависимые задачи и блок `undo:` — точные команды `git revert` / `git switch -c before/…` и их риски. Только чтение |
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Зафиксировать решение |
 | `pm ready [--epic KEY \| --all]` | Готовые задачи эпика этого worktree, указанного эпика или все. Если своего эпика у worktree нет — все, с пометками |
@@ -239,14 +296,14 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
 | `pm alias` | Добавить алиас `pm` в профили оболочек (PowerShell, bash, zsh) |
 | `pm help` | Всё перечисленное плюс фразы. `--help` после любой команды показывает то же |
 
-Статусы: `todo`, `in_progress`, `waiting` (нужен `waiting_on`), `done`, `dropped`.
+Статусы: `todo`, `in_progress`, `waiting` (нужен `waiting_on`), `review` (ждёт мерджа), `done`, `dropped`.
 «Ждёт другую задачу» — это зависимость, а не статус.
 
 ## Хуки
 
 | Событие | Что происходит |
 |---|---|
-| **SessionStart** (startup, resume, clear, compact) | При включённой синхронизации: коммит, pull, проверка ссылки на память. Перерисовка доски, проверка, вывод сводки |
+| **SessionStart** (startup, resume, clear, compact) | При включённой синхронизации: коммит, pull, проверка ссылки на память. Закрытие задач в `review`, чей мердж уже известен (локальные ветки и кэш проверки, без сети); фоновая проверка мерджа, если кэш старше 30 минут. Перерисовка доски, проверка, вывод сводки |
 | **PostToolUse** (Write, Edit, MultiEdit, ExitPlanMode) | Изменился файл внутри доски → перерисовать представления. Записан файл плана → попросить Claude сверить с ним доску |
 | **Stop** | Коммит доски. Если код менялся, а ни задачи этого worktree, ни `PLAN.md` / `decisions.md` не трогались 20 минут → попросить Claude записать прогресс (не чаще раза в 20 минут) |
 | **PreCompact**, **SessionEnd** | Дописать автоматическую заметку (изменённые файлы, последний коммит) в задачи этого worktree в работе и закоммитить |

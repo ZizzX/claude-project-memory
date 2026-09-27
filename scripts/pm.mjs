@@ -47,6 +47,7 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "remember …"                                 record a decision, a project fact or a task detail
   "waiting for …"                              mark the active task blocked, with the reason
   "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
+  /done / "done, only merge left"              close the task: done now, or awaiting merge until its merge closes it
   "the plan changes"                           edit PLAN.md, add a Changelog line and a decision
   "undo that" / "undo the board change"        revert that change of the board itself
   "undo the code of T-007"                     show the undo block, ask, then revert the task's commits
@@ -56,7 +57,8 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "update the plugin" / "later" / "never"      after a [pm] update available line: install it, snooze it 7 days, or stop asking
   "update it yourself, do not ask"             pm.updateNotify=auto — Claude installs new versions and reports them
 After creating an MR/PR for a task: pm set T-NNN pr=<url> — pm show then reads its state and merge SHA.
-Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme`;
+Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme
+Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/claude-project-memory#ending-a-session`;
 
 class UsageError extends Error {}
 const fail = (msg) => {
