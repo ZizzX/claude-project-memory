@@ -17,7 +17,8 @@ import { scanPlans } from './lib/scan.mjs';
 import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
-import { refreshLatest, updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
+import { runMergeCheck, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
+import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
@@ -261,6 +262,12 @@ Re-run with --yes to proceed.`;
 
   _push(cwd, [pm]) {
     pushNow(pm);
+    return '';
+  },
+
+  // Background merge check: spawned by SessionStart when the cache is stale, never run by a person.
+  '_merge-check'(cwd, [pm]) {
+    runMergeCheck({ pm, cwd, limit: BACKGROUND_LOOKUPS, background: true });
     return '';
   },
 
