@@ -57,7 +57,7 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
     };
     lines.push(`Awaiting merge: ${awaiting.map((t) => `${t.id}${pr(t)}${tag(t, epic)}`).join(' · ')}`);
   }
-  if (merge?.ask.length) lines.push(`Merged, still open: ${merge.ask.join(', ')} — ask the user, then pm reconcile --yes (or pm set <id> status=done)`);
+  if (merge?.ask.length) lines.push(`Merged, still open: ${merge.ask.join(', ')} — ask the user, then pm reconcile --yes <the ids they confirm>`);
   if (merge?.conflicts.length) lines.push(`PR conflict: ${merge.conflicts.join(', ')} — details: pm reconcile`);
   if (epics.length) {
     const of = (e) => tasks.filter((t) => t.data.epic === e && t.data.status !== 'dropped');

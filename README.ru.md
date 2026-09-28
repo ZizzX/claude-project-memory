@@ -149,7 +149,7 @@ Elsewhere: T-008 Export to XLSX @ feature-export
 Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
 Awaiting merge: T-002 (#14)
-Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes (or pm set <id> status=done)
+Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes <the ids they confirm>
 Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
 CLI: node "…/scripts/pm.mjs" <command>
@@ -247,6 +247,8 @@ T-041 → review: #15 not merged yet; closes by itself after the merge (git conf
   (текст коммита не считается);
 - forge: `gh` / `glab` сообщает, что PR задачи влит в основную ветку. Это идёт в фоне (не больше
   5 запросов за прогон, никогда во время старта сессии) или сразу через `pm reconcile`.
+  Запросы идут только на хост origin: `pr` на другом хосте показывается, но не проверяется. Без `gh` / `glab`
+  запросы встают на паузу на 24 часа, а fetch основной ветки продолжается.
 
 Мердж, случившийся до `pm done` (первый из двух PR), задачу не закрывает. Смёрженные задачи, которые не
 отметили готовыми, только перечисляются (`Merged, still open`), и Claude спрашивает, прежде чем их закрыть:
@@ -255,9 +257,10 @@ T-041 → review: #15 not merged yet; closes by itself after the merge (git conf
 $ pm reconcile
 checked 3 of 3 tasks with a PR or branch
 Closed: T-041 (#15)
-Merged, still open: T-038 (#10) — close them: pm reconcile --yes, or one by one: pm set <id> status=done
+Merged, still open: T-038 (#10) — close the confirmed ones: pm reconcile --yes <ids>, or pm set <id> status=done
 Merge not checked: T-044 — gh is not installed — fix: install gh, run gh auth login, then pm reconcile
-$ pm reconcile --yes
+$ pm reconcile --yes T-038
+Closed: T-038 (#10)
 ```
 
 Каждая строка об ошибке говорит, что случилось, почему и какой командой это исправить.
@@ -281,7 +284,7 @@ $ pm reconcile --yes
 | `pm claim T-003` | Привязать задачу к этому worktree и поставить `in_progress` (задача в `review` остаётся в `review`) |
 | `pm log T-003 --did "…" --next "…"` | Добавить запись в журнал работы |
 | `pm done T-003 [--did "…"] [--pr url \| --no-merge]` | Готово и проверено: `done` или `review`, пока её не закроет мердж. Печатает итог и причину |
-| `pm reconcile [--yes] [--no-fetch]` | Найти смёрженные задачи сейчас: закрывает задачи в `review`, перечисляет остальные (`--yes` закрывает и их), конфликты PR, задачи, ждущие мерджа 7+ дней, и те, что проверить не удалось |
+| `pm reconcile [--yes [ids]] [--no-fetch]` | Найти смёрженные задачи сейчас: закрывает задачи в `review`, перечисляет остальные (`--yes T-001,T-004` закрывает эти, голый `--yes` — все), конфликты PR, задачи, ждущие мерджа 7+ дней, и те, что проверить не удалось |
 | `pm show T-003` | То, чего нет в файле задачи: ветка, состояние MR/PR, таймлайн, коммиты, решения, зависимые задачи и блок `undo:` — точные команды `git revert` / `git switch -c before/…` и их риски. Только чтение |
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Зафиксировать решение |
 | `pm ready [--epic KEY \| --all]` | Готовые задачи эпика этого worktree, указанного эпика или все. Если своего эпика у worktree нет — все, с пометками |

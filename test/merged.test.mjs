@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { setup, tmp, sh, cli } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
 import { onSessionStart } from '../scripts/lib/hooks.mjs';
-import { subjectIds, sinceDate, subjectHits, originHeadHint, problem, mergeCandidates, acquireLock, runMergeCheck, refreshInBackground, cachedLookup, fetchCommand, classify, closeMerged, CACHE, LOCK_STALE_MS, BACKOFF_MS, REFRESH_AFTER_MS, BACKGROUND_LOOKUPS, GIT_TIMEOUT_MS } from '../scripts/lib/merged.mjs';
+import { subjectIds, sinceDate, subjectHits, originHeadHint, problem, mergeCandidates, acquireLock, runMergeCheck, refreshInBackground, cachedLookup, fetchCommand, classify, closeMerged, reconcile, autoCloseEnabled, CACHE, LOCK_STALE_MS, BACKOFF_MS, REFRESH_AFTER_MS, BACKGROUND_LOOKUPS, GIT_TIMEOUT_MS } from '../scripts/lib/merged.mjs';
 import { newTask, setFields, listTasks } from '../scripts/lib/tasks.mjs';
 import { readState, writeState } from '../scripts/lib/store.mjs';
 
@@ -144,7 +144,7 @@ test('runMergeCheck: background runs rotate by checkedAt, foreground checks all'
   });
 });
 
-test('runMergeCheck: a permanent forge failure pauses background runs for 24 h; pm reconcile retries', () => {
+test('runMergeCheck: a permanent forge failure pauses forge lookups for 24 h, the fetch goes on; pm reconcile retries', () => {
   const { root, pm } = board(2);
   withFixture({ [branchPath(1)]: { $error: 'gh is not logged in', permanent: true }, [branchPath(2)]: { $error: 'gh is not logged in', permanent: true } }, () => {
     assert.deepEqual(runMergeCheck({ pm, cwd: root, limit: 5, fetch: false, background: true, now: 1_000 }), { checked: 1, total: 2 });
@@ -156,13 +156,13 @@ test('runMergeCheck: a permanent forge failure pauses background runs for 24 h; 
     const prev = process.env.PM_NO_BACKGROUND;
     delete process.env.PM_NO_BACKGROUND;
     try {
-      assert.equal(refreshInBackground(pm, root, { now: 1_000 + REFRESH_AFTER_MS + 1, spawnFn }), false, 'no spawn while waiting out the failure');
+      assert.equal(refreshInBackground(pm, root, { now: 1_000 + REFRESH_AFTER_MS + 1, spawnFn }), true, 'the background run still fetches');
       assert.equal(runMergeCheck({ pm, cwd: root, limit: 5, fetch: false, background: true, now: 5_000 }).checked, 0);
       assert.equal(runMergeCheck({ pm, cwd: root, fetch: false, now: 6_000 }).checked, 1, 'foreground retries at once');
     } finally {
       process.env.PM_NO_BACKGROUND = prev;
     }
-    assert.equal(spawned.length, 0);
+    assert.equal(spawned.length, 1);
   });
 });
 
@@ -303,16 +303,17 @@ test('closeMerged: writes done with the merge and a Log line; skips a task chang
 
 // --- pm reconcile end to end ---
 
-test('cli: pm reconcile closes the awaiting-merge task, asks about the rest, --yes closes them; failures say problem, cause, fix', () => {
+test('cli: pm reconcile closes the awaiting-merge task, asks about the rest, --yes <ids> closes only those; failures say problem, cause, fix', () => {
   const { root } = setup();
   cli(['init'], root);
-  for (const title of ['a', 'b', 'c']) cli(['task', 'new', '--title', title], root);
+  for (const title of ['a', 'b', 'c', 'd']) cli(['task', 'new', '--title', title], root);
   cli(['claim', 'T-002'], root);
   cli(['set', 'T-001', 'status=review', 'review_at=2026-01-01T00:00:00.000Z'], root);
   cli(['set', 'T-003', 'status=review', 'review_at=2026-01-01T00:00:00.000Z', 'pr=https://github.com/o/r/pull/9'], root);
   const now = new Date().toISOString();
   commit(root, 'feat(T-001): part a (#15)', now);
   const b = commit(root, 'fix(T-002): part b', now);
+  commit(root, 'docs(T-004): notes', now);
   publish(root);
   const fixture = path.join(tmp(), 'forge.json');
   fs.writeFileSync(fixture, JSON.stringify({ 'repos/o/r/pulls/9': { $error: 'gh is not installed', permanent: true } }));
@@ -321,15 +322,18 @@ test('cli: pm reconcile closes the awaiting-merge task, asks about the rest, --y
   const first = cli(['reconcile', '--no-fetch'], root, { env });
   assert.equal(first.code, 0, first.err);
   const lines = first.out.split('\n');
-  assert.equal(lines[0], 'checked 1 of 1 tasks with a PR or branch');
+  assert.equal(lines[0], 'checked 1 of 2 tasks with a PR or branch', 'origin/master is the default: T-002 on main is looked up too');
   assert.match(first.out, /origin\/HEAD is not set, so origin\/master is assumed .+ — fix: git remote set-head origin -a/);
   assert.match(first.out, /^Closed: T-001 \(#15\)$/m);
-  assert.match(first.out, new RegExp(`^Merged, still open: T-002 \\(master ${b.slice(0, 7)}\\) — close them: pm reconcile --yes`, 'm'));
+  assert.match(first.out, new RegExp(`^Merged, still open: T-002 \\(master ${b.slice(0, 7)}\\), T-004 \\(master [0-9a-f]{7}\\) — close the confirmed ones: pm reconcile --yes <ids>`, 'm'));
   assert.match(first.out, /^Merge not checked: T-003 — gh is not installed — fix: install gh, run gh auth login, then pm reconcile$/m);
   assert.doesNotMatch(first.out, /T-002 \(.*\).*Closed/);
 
-  const second = cli(['reconcile', '--no-fetch', '--yes'], root, { env });
+  const second = cli(['reconcile', '--no-fetch', '--yes', 'T-002,T-009'], root, { env });
   assert.match(second.out, new RegExp(`^Closed: T-002 \\(master ${b.slice(0, 7)}\\)$`, 'm'));
+  assert.match(second.out, /^Not closed: T-009 — no merge of these open tasks was found — fix: pm reconcile to see the list$/m);
+  assert.match(second.out, /^Merged, still open: T-004 /m, 'a task the user did not confirm stays open');
+  assert.equal(cli(['reconcile', 'T-004'], root, { env }).code, 1, 'ids need --yes');
   assert.doesNotMatch(second.out, /origin\/HEAD is not set/, 'the hint is shown once per repo');
   const show = cli(['show', 'T-002'], root).out;
   assert.match(show, /· done$/m);
@@ -445,4 +449,87 @@ test('session start closes a review task from the cache with no forge call, list
   assert.match(show, /· review .+ · done /);
   const again = onSessionStart({ session_id: 's2' }, root);
   assert.doesNotMatch(again, /Closed after merge/, 'closed once');
+});
+
+// --- review fixes ---
+
+test('classify: a review task without review_at is asked about, never left awaiting; pm set status=review stamps it', () => {
+  const hit = { how: 'subject', sha: 'a1', at: T('2026-09-21T10:00:00Z'), pr: null };
+  const out = classify({ tasks: [review('T-001', { review_at: undefined })], local: local({ 'T-001': hit }), cache: {} });
+  assert.deepEqual([ids(out.close), ids(out.ask), ids(out.awaiting)], [[], ['T-001'], []]);
+  const pm = tmp();
+  newTask(pm, { title: 'x', date: '2026-09-12' });
+  assert.match(setFields(pm, 'T-001', { status: 'review' }, '2026-09-12').data.review_at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('classify: a task claimed on the default branch is not a conflict with its feature-branch PR', () => {
+  const t = review('T-001', { branch: 'master', pr: 'https://github.com/o/r/pull/15' });
+  const out = classify({ tasks: [t], local: local(), cache: { tasks: { 'T-001': merged('https://github.com/o/r/pull/15', '2026-09-21T09:00:00Z', { head: 'feat/x' }) } } });
+  assert.deepEqual([out.conflicts, ids(out.close)], [[], ['T-001']]);
+});
+
+test('autoCloseEnabled: git booleans (no / off / 0) turn it off', () => {
+  const { root } = setup();
+  assert.equal(autoCloseEnabled(root), true);
+  for (const v of ['no', 'off', '0', 'False']) {
+    sh(['config', 'pm.autoClose', v], root);
+    assert.equal(autoCloseEnabled(root), false, v);
+  }
+});
+
+test('runMergeCheck: a forge timeout stops this run (offline), without a 24 h pause', () => {
+  const { root, pm } = board(2);
+  withFixture({ [branchPath(1)]: { $error: 'gh timed out (offline?)', timeout: true }, [branchPath(2)]: { $error: 'gh timed out (offline?)', timeout: true } }, () => {
+    assert.deepEqual(runMergeCheck({ pm, cwd: root, fetch: false, now: 1_000 }), { checked: 1, total: 2 });
+    assert.equal(readState(pm, CACHE).backoff, undefined);
+  });
+});
+
+test('reconcile: a running check → nothing closed now, no "nothing merged"; a review task 7+ days old is listed', () => {
+  const { root } = setup();
+  const pm = tmp();
+  newTask(pm, { title: 'a', date: '2026-09-12' });
+  setFields(pm, 'T-001', { status: 'review', review_at: '2026-09-20T10:00:00.000Z' }, '2026-09-20');
+  publish(root);
+  const now = Date.parse('2026-09-30T12:00:00Z');
+  const release = acquireLock(pm, now);
+  const busy = reconcile({ pm, cwd: root, fetch: false, date: '2026-09-30', now });
+  release();
+  assert.match(busy.lines[0], /^Forge not checked now — a background merge check is running — fix: /);
+  assert.ok(busy.lines.some((l) => l.startsWith('Not closed now — ')));
+  assert.ok(!busy.lines.some((l) => l.startsWith('Nothing merged')));
+  const free = reconcile({ pm, cwd: root, fetch: false, date: '2026-09-30', now });
+  assert.ok(free.lines.includes('Awaiting merge 10 days: T-001'), free.lines.join('\n'));
+});
+
+test('pm done: merged before /done with no forge → done from the default branch commit', () => {
+  const { root, file } = doneBoard();
+  const sha = commit(root, 'feat(T-001): part a (#21)', new Date().toISOString());
+  publish(root);
+  const r = cli(['done', 'T-001', '--did', 'x'], root);
+  assert.equal(r.out, `T-001 → done: ${sha.slice(0, 7)} (#21) is already on master`);
+  assert.match(fs.readFileSync(file, 'utf8'), /merged_how: "?subject/);
+});
+
+test('pm done: a reused branch whose PR was merged before the newest commit awaits the next PR; a closed PR says so', () => {
+  const { root } = setup();
+  sh(['remote', 'add', 'origin', 'git@github.com:o/r.git'], root);
+  sh(['checkout', '-q', '-b', 'feat/a'], root);
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a'], root);
+  cli(['claim', 'T-001'], root);
+  commit(root, 'feat(T-001): second part', new Date().toISOString());
+  const fixture = path.join(tmp(), 'forge.json');
+  const old = { ...mergedPr, head: { ref: 'feat/a' }, merged_at: '2026-01-01T00:00:00Z' };
+  fs.writeFileSync(fixture, JSON.stringify({
+    'repos/o/r/pulls?head=o%3Afeat%2Fa&state=all': [old],
+    'repos/o/r/pulls/16': { ...openPr, html_url: 'https://github.com/o/r/pull/16', state: 'closed' },
+  }));
+  const r = cli(['done', 'T-001', '--did', 'x'], root, { env: { PM_FORGE_FIXTURE: fixture } });
+  assert.match(r.out, /^T-001 → review: #15 was merged before this task's last commit, no newer PR found; /);
+  const file = path.join(pmDir(root), 'tasks', 'T-001.md');
+  assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /pull\/15/, 'the old PR is not stored as the task\'s pr');
+  cli(['set', 'T-001', 'status=in_progress'], root);
+  const closed = cli(['done', 'T-001', '--pr', 'https://github.com/o/r/pull/16'], root, { env: { PM_FORGE_FIXTURE: fixture } });
+  assert.match(closed.out, /^T-001 → review: #16 was closed without merging; /);
 });

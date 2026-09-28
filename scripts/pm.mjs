@@ -33,7 +33,7 @@ const USAGE = `usage: pm <command>
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
   prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids stay as they are
-  reconcile [--yes] [--no-fetch]               find merged tasks: close awaiting-merge ones, list the rest (--yes closes them)
+  reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close awaiting-merge ones, list the rest (--yes closes the listed, or all)
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -280,9 +280,12 @@ Re-run with --yes to proceed.`;
   },
 
   reconcile(cwd, args) {
-    const { values } = parseArgs({ args, options: { yes: { type: 'boolean' }, 'no-fetch': { type: 'boolean' } } });
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { yes: { type: 'boolean' }, 'no-fetch': { type: 'boolean' } } });
+    const ids = positionals.flatMap(list);
+    if (ids.length && !values.yes) fail('usage: pm reconcile [--yes [T-001,T-002]] [--no-fetch]');
     const pm = requireBoard(cwd);
-    const { lines, closed } = reconcile({ pm, cwd, yes: Boolean(values.yes), fetch: !values['no-fetch'], date: today() });
+    const yes = ids.length ? ids : Boolean(values.yes);
+    const { lines, closed } = reconcile({ pm, cwd, yes, fetch: !values['no-fetch'], date: today() });
     if (closed.length) persist(pm, `${CLOSED_PREFIX}${closed.join(', ')}`);
     return lines.join('\n');
   },

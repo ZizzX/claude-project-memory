@@ -148,7 +148,7 @@ Elsewhere: T-008 Export to XLSX @ feature-export
 Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
 Awaiting merge: T-002 (#14)
-Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes (or pm set <id> status=done)
+Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes <the ids they confirm>
 Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
 CLI: node "…/scripts/pm.mjs" <command>
@@ -245,6 +245,8 @@ A `review` task closes by itself once its own merge is seen: at a later session 
   (the body does not count);
 - the forge: `gh` / `glab` reports the task's PR merged into the default branch. This runs in the
   background (at most 5 lookups per run, never during a session start) or in the foreground with `pm reconcile`.
+  Only origin's host is asked: a `pr` on another host is reported, not looked up. Without `gh` / `glab`
+  the lookups pause for 24 hours, while the fetch of the default branch goes on.
 
 A merge that happened before `pm done` (the first of two PRs) does not close the task. Tasks that were
 merged but never marked done are only listed (`Merged, still open`); Claude asks before closing them:
@@ -253,9 +255,10 @@ merged but never marked done are only listed (`Merged, still open`); Claude asks
 $ pm reconcile
 checked 3 of 3 tasks with a PR or branch
 Closed: T-041 (#15)
-Merged, still open: T-038 (#10) — close them: pm reconcile --yes, or one by one: pm set <id> status=done
+Merged, still open: T-038 (#10) — close the confirmed ones: pm reconcile --yes <ids>, or pm set <id> status=done
 Merge not checked: T-044 — gh is not installed — fix: install gh, run gh auth login, then pm reconcile
-$ pm reconcile --yes
+$ pm reconcile --yes T-038
+Closed: T-038 (#10)
 ```
 
 Every failure line says what happened, why, and the command that fixes it. `git config pm.autoClose false`
@@ -277,7 +280,7 @@ assumed and `pm reconcile` prints the fix once: `git remote set-head origin -a`.
 | `pm claim T-003` | Attach this worktree to the task and set `in_progress` (a `review` task stays `review`) |
 | `pm log T-003 --did "…" --next "…"` | Append a work log entry |
 | `pm done T-003 [--did "…"] [--pr url \| --no-merge]` | Finished and verified: `done`, or `review` until its merge closes it. Prints the outcome and why |
-| `pm reconcile [--yes] [--no-fetch]` | Find merged tasks now: closes `review` ones, lists the rest (`--yes` closes them), PR conflicts, tasks awaiting merge 7+ days, tasks it could not check |
+| `pm reconcile [--yes [ids]] [--no-fetch]` | Find merged tasks now: closes `review` ones, lists the rest (`--yes T-001,T-004` closes those, a bare `--yes` all of them), PR conflicts, tasks awaiting merge 7+ days, tasks it could not check |
 | `pm show T-003` | What the task file does not say: branch, MR/PR state, timeline, commits, decisions, dependents, and the `undo:` block — the exact `git revert` / `git switch -c before/…` commands and their risks. Read-only |
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
 | `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |

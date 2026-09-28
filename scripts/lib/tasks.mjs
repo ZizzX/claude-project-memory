@@ -141,6 +141,8 @@ export function setFields(pm, id, fields, date) {
   }
   if ('status' in fields && fields.status !== 'waiting' && !('waiting_on' in fields)) task.data.waiting_on = '';
   if ('status' in fields && fields.status !== 'review' && !('review_at' in fields)) delete task.data.review_at;
+  // Set by hand, review still needs its start: a merge before it is an earlier PR, a merge after it closes the task.
+  if (task.data.status === 'review' && !task.data.review_at) task.data.review_at = new Date().toISOString();
   if (task.data.status === 'waiting' && !task.data.waiting_on) {
     throw new Error('status waiting needs waiting_on="<what we are waiting for>"');
   }

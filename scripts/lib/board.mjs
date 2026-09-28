@@ -317,7 +317,7 @@ h1{font-size:18px;margin:0}.generated{color:var(--muted);font-size:12px;margin:2
 .focus{margin:0 0 12px}.focus>summary{cursor:pointer;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.focus ul{margin:4px 0 0;padding-left:18px}.empty{color:var(--muted);margin:0 0 12px}
 button{font:inherit;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer}
 button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
-.board{display:grid;grid-template-columns:repeat(6,minmax(180px,1fr));gap:12px;align-items:start}
+.board{display:grid;grid-template-columns:repeat(${COLUMNS.length},minmax(180px,1fr));gap:12px;align-items:start}
 .col{background:var(--col);border-radius:8px;padding:0 8px 8px}
 .col>summary{position:sticky;top:0;z-index:1;background:var(--col);padding:8px 4px;cursor:pointer;list-style-position:inside}
 .col h2{display:inline;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}

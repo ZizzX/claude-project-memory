@@ -60,7 +60,7 @@ export function undoPlan({ cwd: from, id, tasks, commits, pr }) {
   if (base) plan.before = `git switch -c before/${id} ${short(base)}`;
 
   for (const t of tasks) {
-    if (t.data.status === 'done' && t.data.depends_on.includes(id)) plan.risks.push(`${t.id} (done) depends on ${id}`);
+    if (['done', 'review'].includes(t.data.status) && t.data.depends_on.includes(id)) plan.risks.push(`${t.id} (${t.data.status}) depends on ${id}`);
   }
   const paths = [...new Set((files ?? '').split('\n').filter(Boolean))];
   if (paths.length > MAX_FILES) {

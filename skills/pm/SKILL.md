@@ -41,7 +41,7 @@ into the board's Archive by itself; there is nothing to close.
 | During work | Refinements → `## Understanding`. A real decision → `pm decision --title … --why … --rejected …`. |
 | You believe the task is done | Definition of done: checklist closed AND verification actually ran (tests, a run of the app). Then ask "what's left?": every leftover becomes `pm task new … --deps T-NNN`. Only then `pm done T-NNN --did "…"` — it decides: `done` when nothing is to be merged or the task's own PR is already merged, else `review` until the merge closes it. Tell the user the outcome line it prints. If anything is unfinished, say "partially done", keep the status, and `pm log … --next "<exact next step>"`. |
 | `/done`, "done, only merge left", "готово, закрываем" | Follow `/done` (commands/done.md): check the verdict against the definition of done above, then `pm done`. |
-| `Merged, still open: …` in the summary | These tasks were merged but are not closed. Ask the user; on yes `pm reconcile --yes` (or `pm set T-NNN status=done` one by one). Never close them on your own. `PR conflict: …` → run `pm reconcile` and show its fix line. `Closed after merge: …` → just mention it. |
+| `Merged, still open: …` in the summary | These tasks were merged but are not closed. Ask the user about each; close only the ones confirmed: `pm reconcile --yes T-001,T-004` (a bare `--yes` closes every listed one). Never close them on your own. `PR conflict: …` → run `pm reconcile` and show its fix line. `Closed after merge: …` → just mention it. |
 | The plugin was just updated to a version with `pm reconcile` (first session after it) | Run `pm reconcile` once, so tasks merged earlier but never closed are listed; then ask as above. |
 | "we're done", "continue in a new session" | For every in-progress task of this worktree: `pm log T-NNN --did "…" --next "<exact next step>"`. Update `## Current focus` if it moved. Tell the user `/clear` is safe — the next session starts from the summary. |
 | "remember …" | Exactly one place: a decision → `pm decision`; a durable fact about the user or project → auto-memory; a detail of a task → that task's `## Understanding`. |
@@ -82,7 +82,7 @@ pm set T-003 key=value ...                      status, order, depends_on, waiti
 pm claim T-003                                  attach this worktree, status in_progress (a review task keeps review)
 pm log T-003 --did "..." --next "..."           append a Log entry
 pm done T-003 [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
-pm reconcile [--yes] [--no-fetch]               find merged tasks: close review ones, list the rest (--yes closes them)
+pm reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close review ones, list the rest (--yes closes the listed, or all)
 pm show T-003                                   branch, MR/PR, timeline, commits, decisions, dependents, undo block
 pm decision --title T --why W --rejected R [--tasks T-001]
 pm ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), of one epic, or all

@@ -67,9 +67,11 @@ export function onSessionStart(input, cwd) {
   if (!pm) return '';
   if (!hasBoard(cwd)) return sharedBoardHint(cwd) ? HINT : '';
   let status = '';
+  let conflicted = false;
   if (isSyncOn(pm)) {
     commitPm(pm, 'pm: session start');
-    if (pull(pm) === 'conflict') status = `[pm] sync conflict in ${(conflictFiles(pm) ?? []).join(', ')} — run: pm sync`;
+    conflicted = pull(pm) === 'conflict';
+    if (conflicted) status = `[pm] sync conflict in ${(conflictFiles(pm) ?? []).join(', ')} — run: pm sync`;
     if (memorySyncEnabled(cwd)) {
       try {
         linkMemory(cwd, pm);
@@ -82,10 +84,14 @@ export function onSessionStart(input, cwd) {
   }
   let tasks = listTasks(pm); // after the pull: one scan serves the board, validation and the summary
   let merge = null;
-  try {
-    merge = mergeAtStart({ pm, cwd, tasks, date: today() });
-  } catch (e) {
-    if (process.env.PM_DEBUG) console.error(e); // a merge check never breaks a session start
+  // Mid-rebase the task files may hold one side of a conflict: nothing is closed or committed until pm sync.
+  if (!conflicted) {
+    try {
+      merge = mergeAtStart({ pm, cwd, tasks, date: today() });
+    } catch (e) {
+      if (process.env.PM_DEBUG) console.error(e); // a merge check never breaks a session start
+      tasks = listTasks(pm);
+    }
   }
   if (merge?.closedIds.length) {
     tasks = listTasks(pm);

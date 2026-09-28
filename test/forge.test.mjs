@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setup, tmp, sh } from './helpers.mjs';
-import { parsePrUrl, parseRemote, prRequest, normalizePr, forgeApi, forgeCall, prInfo, prLookup, defaultBranch } from '../scripts/lib/forge.mjs';
+import { parsePrUrl, parseRemote, prRequest, normalizePr, forgeCall, prInfo, prLookup, defaultBranch } from '../scripts/lib/forge.mjs';
 
 function withFixture(responses, fn) {
   const file = path.join(tmp(), 'forge.json');
@@ -55,24 +55,11 @@ test('normalizePr: GitHub merged and open, GitLab merged with squash, bad shapes
   assert.equal(normalizePr('gitlab', null), null);
 });
 
-test('forgeApi reads the fixture instead of spawning; a missing key, file or CLI is null', () => {
-  withFixture({ 'repos/o/r/pulls/7': { html_url: 'u' } }, () => {
-    assert.deepEqual(forgeApi({ cli: 'gh', host: 'github.com', path: 'repos/o/r/pulls/7' }), { html_url: 'u' });
-    assert.equal(forgeApi({ cli: 'gh', host: 'github.com', path: 'repos/o/r/pulls/8' }), null);
-  });
-  const prev = process.env.PM_FORGE_FIXTURE;
-  try {
-    delete process.env.PM_FORGE_FIXTURE; // the real exec path, with a CLI that does not exist: no network
-    assert.equal(forgeApi({ cli: 'pm-no-such-cli', host: 'git.corp.io', path: 'x' }), null);
-  } finally {
-    process.env.PM_FORGE_FIXTURE = prev;
-  }
-});
-
-test('prInfo: pr URL with data, without data, unknown shape; lookup by branch skips the default branch', () => {
+test('prInfo: pr URL with data, without data, unknown shape, another host; lookup by branch skips the default branch', () => {
   const { root } = setup();
   sh(['remote', 'add', 'origin', 'git@gitlab.corp.io:ats/app.git'], root);
   withFixture({
+    'projects/ats%2Fapp/merge_requests/7': { web_url: 'https://gitlab.corp.io/ats/app/-/merge_requests/7', state: 'opened', author: { username: 'a' } },
     'repos/o/r/pulls/7': { html_url: 'https://github.com/o/r/pull/7', state: 'open', merged_at: null, user: { login: 'a' } },
     'projects/ats%2Fapp/merge_requests?source_branch=feat%2Fx&state=all': [
       { web_url: 'https://gitlab.corp.io/ats/app/-/merge_requests/3', state: 'merged', merged_at: '2026-09-10T09:02:00Z', merge_commit_sha: 'm1', squash_commit_sha: 's1', author: { username: 'aziz' } },
@@ -80,8 +67,9 @@ test('prInfo: pr URL with data, without data, unknown shape; lookup by branch sk
     'projects/ats%2Fapp/merge_requests?source_branch=main&state=all': [{ web_url: 'main-mr', state: 'opened' }],
     'projects/ats%2Fapp/merge_requests?source_branch=feat%2Fnone&state=all': [],
   }, () => {
-    assert.equal(prInfo({ pr: 'https://github.com/o/r/pull/7' }, root).state, 'open');
-    assert.deepEqual(prInfo({ pr: 'https://github.com/o/r/pull/8' }, root), { url: 'https://github.com/o/r/pull/8', unavailable: 'no data from gh' });
+    assert.equal(prInfo({ pr: 'https://gitlab.corp.io/ats/app/-/merge_requests/7' }, root).state, 'open');
+    assert.deepEqual(prInfo({ pr: 'https://gitlab.corp.io/ats/app/-/merge_requests/8' }, root), { url: 'https://gitlab.corp.io/ats/app/-/merge_requests/8', unavailable: 'no data from glab' });
+    assert.deepEqual(prInfo({ pr: 'https://github.com/o/r/pull/7' }, root), { url: 'https://github.com/o/r/pull/7', unavailable: 'the PR is on github.com, origin is gitlab.corp.io' }, "only origin's host is asked");
     assert.deepEqual(prInfo({ pr: 'https://example.com/whatever' }, root), { url: 'https://example.com/whatever', unavailable: 'unknown PR URL' });
     const byBranch = prInfo({ branch: 'feat/x' }, root);
     assert.equal(byBranch.foundByBranch, true);
