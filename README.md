@@ -113,6 +113,7 @@ If PowerShell refuses to load the profile, allow it once with `Set-ExecutionPoli
 | "remember …" | Puts it in exactly one place: a decision, auto-memory, or the task's `## Understanding` |
 | "waiting for …" | `status=waiting` with the reason; the task leaves Ready |
 | "we're done", "continue in a new session" | Logs `did` / `next` on every active task of this worktree, updates focus |
+| `/done`, "done, only merge left" | Checks the conversation against the definition of done, then `pm done`: the task is `done`, or awaits its merge and closes by itself once it lands — see [Ending a session](#ending-a-session) |
 | "the plan changes" | Edits `PLAN.md`, adds a Changelog line, records a decision |
 | "undo that", "undo the board change" | Reverts that change of the board itself with git |
 | "undo the code of T-007", "remove the changes of T-007" | Shows the `undo:` block of `pm show T-007` with its risks, waits for your yes, then reverts the task's commits in a new undo task on a `revert/T-007` branch |
@@ -129,7 +130,7 @@ code by itself — it prints the exact command and waits.
 After you open an MR/PR for a task, say so or run `pm set T-NNN pr=<url>`: `pm show` then reads its state,
 merge SHA and author, and the undo block targets the merge commit instead of the individual commits.
 
-Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили»,
+Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили», «готово, закрываем»,
 «продолжим в новой сессии», «план меняется», «ждём», «отмени правку доски», «откати код T-007»,
 «вернись к состоянию до T-007», «включи синхронизацию доски», «подключи доску», «добавь алиас pm», «обнови плагин»,
 «позже», «не напоминай», «обновляй сам».
@@ -146,6 +147,8 @@ Your worktree (feature-csv):
 Elsewhere: T-008 Export to XLSX @ feature-export
 Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
+Awaiting merge: T-002 (#14)
+Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes <the ids they confirm>
 Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
 CLI: node "…/scripts/pm.mjs" <command>
@@ -159,6 +162,10 @@ Rules: …
 | Elsewhere | tasks in progress in other worktrees — do not take them |
 | Ready | `todo` tasks whose dependencies are all done, for this worktree's epic |
 | Waiting | tasks blocked on something outside the board, and what |
+| Closed after merge | `review` tasks closed at this session start because their merge was seen |
+| Awaiting merge | `review` tasks: finished, only the merge is left |
+| Merged, still open | tasks whose merge was seen but that were never marked done: Claude asks before closing them |
+| PR conflict | the task's `pr` comes from another branch than the task's; `pm reconcile` prints the fix |
 | Epics | open / total per direction |
 | Decisions | the three most recent |
 
@@ -214,6 +221,55 @@ Typical shapes:
 
 If a small fix spills into a second session, file the task then. It is cheaper than filing ahead.
 
+## Ending a session
+
+When the work is finished, say `/done` (or "done, only merge left"). Claude checks the conversation first:
+the checklist is closed and the verification really ran. Then it runs `pm done`, which prints what happened:
+
+```
+$ pm done T-042 --did "compared the two parsers, picked csv-parse"
+T-042 → done: no PR or commits, nothing to merge
+
+$ pm done T-041 --did "CSV import, tests green"
+T-041 → review: #15 not merged yet; closes by itself after the merge (git config pm.autoClose false turns that off)
+```
+
+A task expects a merge when it has a `pr` or linked commits. `--pr <url>` stores the PR first,
+`--no-merge` closes it now. If anything is unfinished, Claude says what, files leftovers as tasks and
+logs the exact next step instead.
+
+A `review` task closes by itself once its own merge is seen: at a later session start, or at once with
+`pm reconcile`. A merge is seen in two ways:
+
+- a commit on the default branch whose subject names the task: `feat(T-041): …` or `[T-041] …`
+  (the body does not count);
+- the forge: `gh` / `glab` reports the task's PR merged into the default branch. This runs in the
+  background (at most 5 lookups per run, never during a session start) or in the foreground with `pm reconcile`.
+  Only origin's host is asked: a `pr` on another host is reported, not looked up. Without `gh` / `glab`
+  the lookups pause for 24 hours, while the fetch of the default branch goes on.
+
+A merge that happened before `pm done` (the first of two PRs) does not close the task. Tasks that were
+merged but never marked done are only listed (`Merged, still open`); Claude asks before closing them:
+
+```
+$ pm reconcile
+checked 3 of 3 tasks with a PR or branch
+Closed: T-041 (#15)
+Merged, still open: T-038 (#10) — close the confirmed ones: pm reconcile --yes <ids>, or pm set <id> status=done
+Merge not checked: T-044 — gh is not installed — fix: install gh, run gh auth login, then pm reconcile
+$ pm reconcile --yes T-038
+Closed: T-038 (#10)
+```
+
+Every failure line says what happened, why, and the command that fixes it. `git config pm.autoClose false`
+turns every automatic close into a question. When `origin/HEAD` is not set, `main` or `master` is
+assumed and `pm reconcile` prints the fix once: `git remote set-head origin -a`.
+
+**Upgrading.** Update every machine that shares the board: an older version shows
+`bad status "review"` in its board-problems line and leaves `review` cards out of `BOARD.md` and
+`board.html` (the task files stay). To roll back, first `pm set T-NNN status=in_progress` for each
+`review` task. After the update, run `pm reconcile` once to find tasks merged earlier but never closed.
+
 ## Commands
 
 | Command | What it does |
@@ -221,8 +277,10 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 | `pm init` | Create the board for this repository |
 | `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b]` | Create a task. Without `--epic` it inherits this worktree's epic |
 | `pm set T-003 key=value …` | Change fields: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title`, `pr` (the MR/PR URL `pm show` reads) |
-| `pm claim T-003` | Attach this worktree to the task and set `in_progress` |
+| `pm claim T-003` | Attach this worktree to the task and set `in_progress` (a `review` task stays `review`) |
 | `pm log T-003 --did "…" --next "…"` | Append a work log entry |
+| `pm done T-003 [--did "…"] [--pr url \| --no-merge]` | Finished and verified: `done`, or `review` until its merge closes it. Prints the outcome and why |
+| `pm reconcile [--yes [ids]] [--no-fetch]` | Find merged tasks now: closes `review` ones, lists the rest (`--yes T-001,T-004` closes those, a bare `--yes` all of them), PR conflicts, tasks awaiting merge 7+ days, tasks it could not check |
 | `pm show T-003` | What the task file does not say: branch, MR/PR state, timeline, commits, decisions, dependents, and the `undo:` block — the exact `git revert` / `git switch -c before/…` commands and their risks. Read-only |
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
 | `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |
@@ -237,14 +295,14 @@ If a small fix spills into a second session, file the task then. It is cheaper t
 | `pm alias` | Add the `pm` alias to your shell profiles (PowerShell, bash, zsh) |
 | `pm help` | All of the above, plus the phrases. `--help` after any command shows the same |
 
-Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `done`, `dropped`.
+Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `review` (awaiting merge), `done`, `dropped`.
 "Blocked by another task" is a dependency, not a status.
 
 ## Hooks
 
 | Event | What happens |
 |---|---|
-| **SessionStart** (startup, resume, clear, compact) | With sync on: commit, pull, check the memory link. Redraw the board, validate it, print the summary |
+| **SessionStart** (startup, resume, clear, compact) | With sync on: commit, pull, check the memory link. Close `review` tasks whose merge is already known (local refs and the merge cache, no network); start a background merge check when the cache is older than 30 minutes. Redraw the board, validate it, print the summary |
 | **PostToolUse** (Write, Edit, MultiEdit, ExitPlanMode) | A file inside the board changed → redraw the views. A plan file was written → ask Claude to reconcile the board with it |
 | **Stop** | Commit the board. If code changed but neither this worktree's tasks nor `PLAN.md` / `decisions.md` were touched for 20 minutes → ask Claude to log progress (at most once per 20 minutes) |
 | **PreCompact**, **SessionEnd** | Append an automatic note (changed files, last commit) to this worktree's in-progress tasks and commit |

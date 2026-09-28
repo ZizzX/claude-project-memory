@@ -113,7 +113,7 @@ test('pm show: an MR found by branch on a GitLab origin; a PR the forge has no d
   }));
   const env = { env: { PM_FORGE_FIXTURE: fixture } };
   assert.match(cli(['show', 'T-001'], root, env).out, /\npr: https:\/\/gitlab\.corp\.io\/ats\/app\/-\/merge_requests\/3 \(found by branch\) · open · @aziz\n/);
-  assert.match(cli(['show', 'T-002'], root, env).out, /\npr: https:\/\/github\.com\/o\/r\/pull\/9 \(no data from gh\)\n/);
+  assert.match(cli(['show', 'T-002'], root, env).out, /\npr: https:\/\/github\.com\/o\/r\/pull\/9 \(the PR is on github\.com, origin is gitlab\.corp\.io\)\n/, "only origin's host is asked");
 });
 
 test('pm show: unknown id and missing id are errors', () => {

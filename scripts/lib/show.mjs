@@ -17,6 +17,11 @@ function prLine(pr) {
   return parts.join(' · ');
 }
 
+// The board commit of merged tasks closed by pm reconcile or at session start: "pm: reconcile closed T-001, T-002".
+export const CLOSED_PREFIX = 'pm: reconcile closed ';
+// pm done's board commit: "pm: done T-001 → review".
+export const DONE_PREFIX = 'pm: done ';
+
 // Board history of one task from pm commit subjects ("<unix>\t<author>\t<subject>"), oldest first.
 // A run of the same label keeps its first event: re-claims and repeated statuses add nothing to read.
 export function timelineEvents(lines, id) {
@@ -31,7 +36,9 @@ export function timelineEvents(lines, id) {
     const subject = rest.join('\t');
     const label = subject === `pm: task new ${id}` ? 'created'
       : subject === `pm: claim ${id}` ? 'claimed'
-        : subject.startsWith(setPrefix) ? statusOf(subject.slice(setPrefix.length)) : undefined;
+        : subject.startsWith(setPrefix) ? statusOf(subject.slice(setPrefix.length))
+          : subject.startsWith(`${DONE_PREFIX}${id} → `) ? subject.slice(`${DONE_PREFIX}${id} → `.length)
+          : subject.startsWith(CLOSED_PREFIX) && subject.slice(CLOSED_PREFIX.length).split(', ').includes(id) ? 'done' : undefined;
     if (label && events.at(-1)?.label !== label) events.push({ label, at: Number(at), author });
   }
   return events;
@@ -49,6 +56,10 @@ export function showTask(pm, cwd, id) {
   if (data.branch) lines.push(`branch: ${data.branch}`);
   const pr = prInfo(data, cwd);
   if (pr) lines.push(prLine(pr));
+  if (data.merged_how) {
+    const at = Date.parse(data.merged_at ?? '');
+    lines.push(`merged: ${data.merged_sha ? String(data.merged_sha).slice(0, 12) : 'sha unknown'} (${data.merged_how}), ${Number.isFinite(at) ? stamp(at / 1000) : 'date unknown'}`);
+  }
   const events = timelineEvents(boardHistory(pm, id), id);
   if (events.length) lines.push(`timeline: ${events.map((e) => `${e.label} ${stamp(e.at)} ${e.author}`).join(' · ')}`);
   const commits = describeCommits(cwd, data.commits ?? []);

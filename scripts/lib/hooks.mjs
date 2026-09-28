@@ -9,6 +9,8 @@ import { writeBoard } from './board.mjs';
 import { buildSummary } from './summary.mjs';
 import { pull, conflictFiles, unpushedOverDay, sharedBoardHint, linkMemory, memorySyncEnabled } from './sync.mjs';
 import { updateLine } from './update.mjs';
+import { mergeAtStart } from './merged.mjs';
+import { CLOSED_PREFIX } from './show.mjs';
 
 // ponytail: one global threshold; per-project config only if users ask for it.
 export const STALE_MINUTES = 20;
@@ -65,9 +67,11 @@ export function onSessionStart(input, cwd) {
   if (!pm) return '';
   if (!hasBoard(cwd)) return sharedBoardHint(cwd) ? HINT : '';
   let status = '';
+  let conflicted = false;
   if (isSyncOn(pm)) {
     commitPm(pm, 'pm: session start');
-    if (pull(pm) === 'conflict') status = `[pm] sync conflict in ${(conflictFiles(pm) ?? []).join(', ')} — run: pm sync`;
+    conflicted = pull(pm) === 'conflict';
+    if (conflicted) status = `[pm] sync conflict in ${(conflictFiles(pm) ?? []).join(', ')} — run: pm sync`;
     if (memorySyncEnabled(cwd)) {
       try {
         linkMemory(cwd, pm);
@@ -78,8 +82,23 @@ export function onSessionStart(input, cwd) {
     const unpushed = unpushedOverDay(pm);
     if (!status && unpushed) status = `[pm] ${unpushed} board commits not pushed for over a day — run: pm sync`;
   }
-  const tasks = listTasks(pm); // after the pull: one scan serves the board, validation and the summary
-  writeBoard(pm, tasks);
+  let tasks = listTasks(pm); // after the pull: one scan serves the board, validation and the summary
+  let merge = null;
+  // Mid-rebase the task files may hold one side of a conflict: nothing is closed or committed until pm sync.
+  if (!conflicted) {
+    try {
+      merge = mergeAtStart({ pm, cwd, tasks, date: today() });
+    } catch (e) {
+      if (process.env.PM_DEBUG) console.error(e); // a merge check never breaks a session start
+      tasks = listTasks(pm);
+    }
+  }
+  if (merge?.closedIds.length) {
+    tasks = listTasks(pm);
+    persist(pm, `${CLOSED_PREFIX}${merge.closedIds.join(', ')}`, tasks);
+  } else {
+    writeBoard(pm, tasks);
+  }
   const problems = validate(tasks);
   if (!status && problems.length) status = `[pm] board problems: ${problems.slice(0, 3).join('; ')} — run: pm validate`;
   // A missing session_id means no stdin reached us (a plugin reload, not a real session start).
@@ -87,7 +106,7 @@ export function onSessionStart(input, cwd) {
   if (input.session_id) writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
   const notice = updateLine({ pm, cwd }); // never blocks: local sources plus the cached network result
   const statusLine = [status, notice].filter(Boolean).join('\n');
-  return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine, tasks });
+  return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine, tasks, merge });
 }
 
 export function onPostToolUse(input, cwd) {

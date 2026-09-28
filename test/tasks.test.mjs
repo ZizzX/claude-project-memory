@@ -145,3 +145,19 @@ test('claim writes the branch only when there is one; commits is an optional lis
   assert.deepEqual(readTask(pm, 'T-002').data.commits, ['aaaaaaaaaaaa', 'bbbbbbbbbbbb']);
   assert.match(fs.readFileSync(path.join(pm, 'tasks', 'T-002.md'), 'utf8'), /\ncommits: \[aaaaaaaaaaaa, bbbbbbbbbbbb\]\n/);
 });
+
+test('review: claim keeps it awaiting merge; leaving review drops review_at', () => {
+  const pm = tmp();
+  newTask(pm, { title: 'x', date: D });
+  claim(pm, 'T-001', 'w1', D, 'feat/T-001/x');
+  setFields(pm, 'T-001', { status: 'review', review_at: '2026-09-12T10:00:00.000Z', pr: 'https://github.com/o/r/pull/3' }, D);
+  const t = claim(pm, 'T-001', 'w2', D, 'other-branch');
+  assert.equal(t.data.status, 'review');
+  assert.equal(t.data.branch, 'feat/T-001/x');
+  assert.equal(t.data.pr, 'https://github.com/o/r/pull/3');
+  assert.equal(t.data.review_at, '2026-09-12T10:00:00.000Z');
+  assert.deepEqual(t.data.worktrees, ['w1', 'w2']);
+  const back = setFields(pm, 'T-001', { status: 'in_progress' }, D);
+  assert.equal(back.data.review_at, undefined);
+  assert.doesNotMatch(fs.readFileSync(back.file, 'utf8'), /review_at/);
+});

@@ -58,9 +58,19 @@ export function readState(pm, name) {
   }
 }
 
+// temp + rename: a reader never sees a half-written file, an interrupted write leaves the previous one.
+// Windows refuses the rename while another process holds the file open; a plain write then beats failing.
 export function writeState(pm, name, value) {
   fs.mkdirSync(path.join(pm, '.state'), { recursive: true });
-  fs.writeFileSync(stateFile(pm, name), JSON.stringify(value));
+  const file = stateFile(pm, name);
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(value));
+  try {
+    fs.renameSync(temp, file);
+  } catch {
+    fs.rmSync(temp, { force: true });
+    fs.writeFileSync(file, JSON.stringify(value));
+  }
 }
 
 // The Stop nudge compares board-file mtimes. An automatic write (commit capture) records the mtime it replaced,

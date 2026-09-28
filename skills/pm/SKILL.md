@@ -1,6 +1,6 @@
 ---
 name: pm
-description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "continue in a new session", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "add the pm alias", "update the plugin", "later", "never", "update it yourself" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "продолжим в новой сессии", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску", "добавь алиас pm", "обнови плагин", "позже", "не напоминай", "обновляй сам"); when a task is finished or partially finished; and when a plan from another tool was just written.
+description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "done, only merge left", "continue in a new session", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "add the pm alias", "update the plugin", "later", "never", "update it yourself" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "готово, закрываем", "продолжим в новой сессии", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску", "добавь алиас pm", "обнови плагин", "позже", "не напоминай", "обновляй сам"); when a task is finished or partially finished; and when a plan from another tool was just written.
 ---
 
 # pm — project memory
@@ -19,8 +19,9 @@ command to run the CLI; below it is written as `pm`. Run it from inside the proj
 | `memory/` | Claude Code auto-memory (only when sync is on) | as usual |
 | `BOARD.md`, `board.html` | generated views | never edit |
 
-Statuses: `todo | in_progress | waiting | done | dropped`. "Waiting on another task" is `depends_on`,
-not a status; `waiting` is for external blockers and needs `waiting_on`. Ready = `todo` with all
+Statuses: `todo | in_progress | waiting | review | done | dropped`. "Waiting on another task" is `depends_on`,
+not a status; `waiting` is for external blockers and needs `waiting_on`. `review` = finished and verified,
+only the merge is left (set by `pm done`); it closes by itself once its own merge is seen. Ready = `todo` with all
 dependencies `done`/`dropped`. A task fits one branch/PR; fine-grained steps live in a linked plan file.
 `## Log` stays the last section of a task file.
 
@@ -38,7 +39,10 @@ into the board's Archive by itself; there is nothing to close.
 | "break it down", a large request | Create board tasks with `pm task new --title … --epic <KEY> --order N --deps …` (one direction = one epic; the epic is inherited from this worktree's tasks when omitted, `--epic ""` makes a repo-wide task on purpose); put detail in a superpowers plan (if installed) and link it with `--links`. |
 | Small work in a repo that has a board (a one-session fix, a review, a question) | Leave the board alone; when the Stop nudge appears, reply that there is nothing to track. File a task afterwards if the work spills into a second session or blocks someone. |
 | During work | Refinements → `## Understanding`. A real decision → `pm decision --title … --why … --rejected …`. |
-| You believe the task is done | Definition of done: checklist closed AND verification actually ran (tests, a run of the app). Then ask "what's left?": every leftover becomes `pm task new … --deps T-NNN`. Only then `pm set T-NNN status=done`. If anything is unfinished, say "partially done", keep the status, and `pm log … --next "<exact next step>"`. |
+| You believe the task is done | Definition of done: checklist closed AND verification actually ran (tests, a run of the app). Then ask "what's left?": every leftover becomes `pm task new … --deps T-NNN`. Only then `pm done T-NNN --did "…"` — it decides: `done` when nothing is to be merged or the task's own PR is already merged, else `review` until the merge closes it. Tell the user the outcome line it prints. If anything is unfinished, say "partially done", keep the status, and `pm log … --next "<exact next step>"`. |
+| `/done`, "done, only merge left", "готово, закрываем" | Follow `/done` (commands/done.md): check the verdict against the definition of done above, then `pm done`. |
+| `Merged, still open: …` in the summary | These tasks were merged but are not closed. Ask the user about each; close only the ones confirmed: `pm reconcile --yes T-001,T-004` (a bare `--yes` closes every listed one). Never close them on your own. `PR conflict: …` → run `pm reconcile` and show its fix line. `Closed after merge: …` → just mention it. |
+| The plugin was just updated to a version with `pm reconcile` (first session after it) | Run `pm reconcile` once, so tasks merged earlier but never closed are listed; then ask as above. |
 | "we're done", "continue in a new session" | For every in-progress task of this worktree: `pm log T-NNN --did "…" --next "<exact next step>"`. Update `## Current focus` if it moved. Tell the user `/clear` is safe — the next session starts from the summary. |
 | "remember …" | Exactly one place: a decision → `pm decision`; a durable fact about the user or project → auto-memory; a detail of a task → that task's `## Understanding`. |
 | "the plan changes" | Edit `PLAN.md` — only your epic's focus line and your own sections — append a Changelog line, record a decision. |
@@ -75,8 +79,10 @@ into the board's Archive by itself; there is nothing to close.
 pm init                                         create the local board
 pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
 pm set T-003 key=value ...                      status, order, depends_on, waiting_on, milestone, epic, links, title, pr
-pm claim T-003                                  attach this worktree, status in_progress
+pm claim T-003                                  attach this worktree, status in_progress (a review task keeps review)
 pm log T-003 --did "..." --next "..."           append a Log entry
+pm done T-003 [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
+pm reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close review ones, list the rest (--yes closes the listed, or all)
 pm show T-003                                   branch, MR/PR, timeline, commits, decisions, dependents, undo block
 pm decision --title T --why W --rejected R [--tasks T-001]
 pm ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), of one epic, or all

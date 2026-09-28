@@ -8,7 +8,7 @@ import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
 import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
-import { showTask } from './lib/show.mjs';
+import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
 import { appendDecision } from './lib/decisions.mjs';
 import { writeBoard } from './lib/board.mjs';
@@ -17,20 +17,23 @@ import { scanPlans } from './lib/scan.mjs';
 import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
-import { refreshLatest, updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
+import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
+import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
   init                                         create the local board for this repo
   task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
   set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, pr, ...)
-  claim <id>                                   attach this worktree and set in_progress
+  claim <id>                                   attach this worktree and set in_progress (a review task keeps review)
   log <id> --did "..." --next "..."            append a work log entry
+  done <id> [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
   show <id>                                    task history: branch, pr, timeline, commits, decisions, dependents
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
   prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids stay as they are
+  reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close awaiting-merge ones, list the rest (--yes closes the listed, or all)
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -44,6 +47,7 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "remember …"                                 record a decision, a project fact or a task detail
   "waiting for …"                              mark the active task blocked, with the reason
   "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
+  /done / "done, only merge left"              close the task: done now, or awaiting merge until its merge closes it
   "the plan changes"                           edit PLAN.md, add a Changelog line and a decision
   "undo that" / "undo the board change"        revert that change of the board itself
   "undo the code of T-007"                     show the undo block, ask, then revert the task's commits
@@ -53,7 +57,8 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "update the plugin" / "later" / "never"      after a [pm] update available line: install it, snooze it 7 days, or stop asking
   "update it yourself, do not ask"             pm.updateNotify=auto — Claude installs new versions and reports them
 After creating an MR/PR for a task: pm set T-NNN pr=<url> — pm show then reads its state and merge SHA.
-Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme`;
+Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme
+Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/claude-project-memory#ending-a-session`;
 
 class UsageError extends Error {}
 const fail = (msg) => {
@@ -261,6 +266,33 @@ Re-run with --yes to proceed.`;
 
   _push(cwd, [pm]) {
     pushNow(pm);
+    return '';
+  },
+
+  done(cwd, [id, ...args]) {
+    const v = parseArgs({ args, options: { did: { type: 'string' }, pr: { type: 'string' }, 'no-merge': { type: 'boolean' } } }).values;
+    if (!id || id.startsWith('-')) fail('usage: pm done <id> [--did "..."] [--pr <url> | --no-merge]');
+    const pm = requireBoard(cwd);
+    const { status, line } = markDone({ pm, cwd, id, did: v.did, pr: v.pr, noMerge: Boolean(v['no-merge']), worktree: worktreeName(cwd), date: today() });
+    startCapture(pm, cwd); // commits made in another status are never linked later
+    persist(pm, `${DONE_PREFIX}${id} → ${status}`);
+    return line;
+  },
+
+  reconcile(cwd, args) {
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { yes: { type: 'boolean' }, 'no-fetch': { type: 'boolean' } } });
+    const ids = positionals.flatMap(list);
+    if (ids.length && !values.yes) fail('usage: pm reconcile [--yes [T-001,T-002]] [--no-fetch]');
+    const pm = requireBoard(cwd);
+    const yes = ids.length ? ids : Boolean(values.yes);
+    const { lines, closed } = reconcile({ pm, cwd, yes, fetch: !values['no-fetch'], date: today() });
+    if (closed.length) persist(pm, `${CLOSED_PREFIX}${closed.join(', ')}`);
+    return lines.join('\n');
+  },
+
+  // Background merge check: spawned by SessionStart when the cache is stale, never run by a person.
+  '_merge-check'(cwd, [pm]) {
+    runMergeCheck({ pm, cwd, limit: BACKGROUND_LOOKUPS, background: true });
     return '';
   },
 

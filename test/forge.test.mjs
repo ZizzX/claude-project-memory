@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setup, tmp, sh } from './helpers.mjs';
-import { parsePrUrl, parseRemote, prRequest, normalizePr, forgeApi, prInfo } from '../scripts/lib/forge.mjs';
+import { parsePrUrl, parseRemote, prRequest, normalizePr, forgeCall, prInfo, prLookup, defaultBranch } from '../scripts/lib/forge.mjs';
 
 function withFixture(responses, fn) {
   const file = path.join(tmp(), 'forge.json');
@@ -42,37 +42,24 @@ test('prRequest builds the API path for one PR or a branch lookup', () => {
 
 test('normalizePr: GitHub merged and open, GitLab merged with squash, bad shapes', () => {
   assert.deepEqual(
-    normalizePr('github', { html_url: 'u', state: 'closed', merged_at: '2026-09-12T23:55:12Z', merge_commit_sha: 'abc', commits: 3, user: { login: 'ZizzX' } }),
-    { url: 'u', state: 'merged', mergedAt: Date.parse('2026-09-12T23:55:12Z') / 1000, mergeSha: 'abc', squashSha: null, commitCount: 3, author: 'ZizzX' },
+    normalizePr('github', { html_url: 'u', state: 'closed', merged_at: '2026-09-12T23:55:12Z', merge_commit_sha: 'abc', commits: 3, user: { login: 'ZizzX' }, base: { ref: 'master' }, head: { ref: 'feat/x' } }),
+    { url: 'u', state: 'merged', mergedAt: Date.parse('2026-09-12T23:55:12Z') / 1000, mergeSha: 'abc', squashSha: null, commitCount: 3, author: 'ZizzX', base: 'master', head: 'feat/x' },
   );
   assert.equal(normalizePr('github', { html_url: 'u', state: 'open', merged_at: null, merge_commit_sha: 'test-merge', user: { login: 'a' } }).mergeSha, null, 'an open PR only has a test merge');
   assert.deepEqual(
-    normalizePr('gitlab', { web_url: 'w', state: 'merged', merged_at: '2026-09-10T09:02:00.000Z', merge_commit_sha: null, squash_commit_sha: 'sq', author: { username: 'aziz' } }),
-    { url: 'w', state: 'merged', mergedAt: Date.parse('2026-09-10T09:02:00.000Z') / 1000, mergeSha: null, squashSha: 'sq', commitCount: null, author: 'aziz' },
+    normalizePr('gitlab', { web_url: 'w', state: 'merged', merged_at: '2026-09-10T09:02:00.000Z', merge_commit_sha: null, squash_commit_sha: 'sq', author: { username: 'aziz' }, target_branch: 'main', source_branch: 'feat/y' }),
+    { url: 'w', state: 'merged', mergedAt: Date.parse('2026-09-10T09:02:00.000Z') / 1000, mergeSha: null, squashSha: 'sq', commitCount: null, author: 'aziz', base: 'main', head: 'feat/y' },
   );
   assert.equal(normalizePr('gitlab', { web_url: 'w', state: 'opened' }).state, 'open');
   assert.equal(normalizePr('github', { message: 'Not Found' }), null);
   assert.equal(normalizePr('gitlab', null), null);
 });
 
-test('forgeApi reads the fixture instead of spawning; a missing key, file or CLI is null', () => {
-  withFixture({ 'repos/o/r/pulls/7': { html_url: 'u' } }, () => {
-    assert.deepEqual(forgeApi({ cli: 'gh', host: 'github.com', path: 'repos/o/r/pulls/7' }), { html_url: 'u' });
-    assert.equal(forgeApi({ cli: 'gh', host: 'github.com', path: 'repos/o/r/pulls/8' }), null);
-  });
-  const prev = process.env.PM_FORGE_FIXTURE;
-  try {
-    delete process.env.PM_FORGE_FIXTURE; // the real exec path, with a CLI that does not exist: no network
-    assert.equal(forgeApi({ cli: 'pm-no-such-cli', host: 'git.corp.io', path: 'x' }), null);
-  } finally {
-    process.env.PM_FORGE_FIXTURE = prev;
-  }
-});
-
-test('prInfo: pr URL with data, without data, unknown shape; lookup by branch skips the default branch', () => {
+test('prInfo: pr URL with data, without data, unknown shape, another host; lookup by branch skips the default branch', () => {
   const { root } = setup();
   sh(['remote', 'add', 'origin', 'git@gitlab.corp.io:ats/app.git'], root);
   withFixture({
+    'projects/ats%2Fapp/merge_requests/7': { web_url: 'https://gitlab.corp.io/ats/app/-/merge_requests/7', state: 'opened', author: { username: 'a' } },
     'repos/o/r/pulls/7': { html_url: 'https://github.com/o/r/pull/7', state: 'open', merged_at: null, user: { login: 'a' } },
     'projects/ats%2Fapp/merge_requests?source_branch=feat%2Fx&state=all': [
       { web_url: 'https://gitlab.corp.io/ats/app/-/merge_requests/3', state: 'merged', merged_at: '2026-09-10T09:02:00Z', merge_commit_sha: 'm1', squash_commit_sha: 's1', author: { username: 'aziz' } },
@@ -80,8 +67,9 @@ test('prInfo: pr URL with data, without data, unknown shape; lookup by branch sk
     'projects/ats%2Fapp/merge_requests?source_branch=main&state=all': [{ web_url: 'main-mr', state: 'opened' }],
     'projects/ats%2Fapp/merge_requests?source_branch=feat%2Fnone&state=all': [],
   }, () => {
-    assert.equal(prInfo({ pr: 'https://github.com/o/r/pull/7' }, root).state, 'open');
-    assert.deepEqual(prInfo({ pr: 'https://github.com/o/r/pull/8' }, root), { url: 'https://github.com/o/r/pull/8', unavailable: 'no data from gh' });
+    assert.equal(prInfo({ pr: 'https://gitlab.corp.io/ats/app/-/merge_requests/7' }, root).state, 'open');
+    assert.deepEqual(prInfo({ pr: 'https://gitlab.corp.io/ats/app/-/merge_requests/8' }, root), { url: 'https://gitlab.corp.io/ats/app/-/merge_requests/8', unavailable: 'no data from glab' });
+    assert.deepEqual(prInfo({ pr: 'https://github.com/o/r/pull/7' }, root), { url: 'https://github.com/o/r/pull/7', unavailable: 'the PR is on github.com, origin is gitlab.corp.io' }, "only origin's host is asked");
     assert.deepEqual(prInfo({ pr: 'https://example.com/whatever' }, root), { url: 'https://example.com/whatever', unavailable: 'unknown PR URL' });
     const byBranch = prInfo({ branch: 'feat/x' }, root);
     assert.equal(byBranch.foundByBranch, true);
@@ -93,4 +81,54 @@ test('prInfo: pr URL with data, without data, unknown shape; lookup by branch sk
     assert.equal(prInfo({ branch: 'trunk' }, root), null, 'origin/HEAD names the default branch');
     assert.equal(prInfo({ branch: 'main' }, root).url, 'main-mr');
   });
+});
+
+test('forgeCall: a failure says why and whether retrying can help', () => {
+  withFixture({ 'a': { $error: 'gh is not logged in', permanent: true }, 'b': { ok: 1 } }, () => {
+    assert.deepEqual(forgeCall({ cli: 'gh', host: 'github.com', path: 'a' }), { cause: 'gh is not logged in', permanent: true });
+    assert.deepEqual(forgeCall({ cli: 'gh', host: 'github.com', path: 'b' }), { json: { ok: 1 } });
+    assert.deepEqual(forgeCall({ cli: 'gh', host: 'github.com', path: 'c' }), { cause: 'not found on the forge', permanent: false });
+  });
+  const prev = process.env.PM_FORGE_FIXTURE;
+  try {
+    delete process.env.PM_FORGE_FIXTURE;
+    assert.deepEqual(forgeCall({ cli: 'pm-no-such-cli', host: 'git.corp.io', path: 'x' }), { cause: 'pm-no-such-cli is not installed', permanent: true });
+  } finally {
+    process.env.PM_FORGE_FIXTURE = prev;
+  }
+});
+
+test('prLookup: ok with base/head, none for no PR, error with the cause and cli', () => {
+  const { root } = setup();
+  sh(['remote', 'add', 'origin', 'git@github.com:o/r.git'], root);
+  withFixture({
+    'repos/o/r/pulls/7': { html_url: 'https://github.com/o/r/pull/7', state: 'closed', merged_at: '2026-09-12T10:00:00Z', merge_commit_sha: 'm7', base: { ref: 'master' }, head: { ref: 'feat/x' }, user: { login: 'a' } },
+    'repos/o/r/pulls/9': { $error: 'gh is not logged in', permanent: true },
+    'repos/o/r/pulls?head=o%3Afeat%2Fnone&state=all': [],
+  }, () => {
+    const ok = prLookup({ pr: 'https://github.com/o/r/pull/7' }, root);
+    assert.equal(ok.status, 'ok');
+    assert.equal(ok.pr.state, 'merged');
+    assert.equal(ok.pr.base, 'master');
+    assert.equal(ok.pr.head, 'feat/x');
+    assert.deepEqual(prLookup({ pr: 'https://github.com/o/r/pull/9' }, root), { status: 'error', cause: 'gh is not logged in', permanent: true, cli: 'gh' });
+    assert.deepEqual(prLookup({ pr: 'https://github.com/o/r/pull/8' }, root), { status: 'error', cause: 'not found on the forge', permanent: false, cli: 'gh' });
+    assert.deepEqual(prLookup({ pr: 'nope' }, root), { status: 'error', cause: 'unknown PR URL', permanent: true });
+    assert.deepEqual(prLookup({ branch: 'feat/none' }, root), { status: 'none' });
+    assert.deepEqual(prLookup({ branch: 'feat/gone' }, root).status, 'error', 'a failed branch lookup is not "no PR"');
+    assert.deepEqual(prLookup({}, root), { status: 'none' });
+  });
+});
+
+test('defaultBranch: origin/HEAD, else origin/main, else origin/master, else null', () => {
+  const { root } = setup();
+  assert.equal(defaultBranch(root), null);
+  const head = sh(['rev-parse', 'HEAD'], root);
+  sh(['update-ref', 'refs/remotes/origin/master', head], root);
+  assert.deepEqual(defaultBranch(root), { remote: 'origin', branch: 'master', ref: 'origin/master', guessed: true });
+  sh(['update-ref', 'refs/remotes/origin/main', head], root);
+  assert.equal(defaultBranch(root).branch, 'main');
+  sh(['update-ref', 'refs/remotes/origin/trunk', head], root);
+  sh(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], root);
+  assert.deepEqual(defaultBranch(root), { remote: 'origin', branch: 'trunk', ref: 'origin/trunk', guessed: false });
 });
