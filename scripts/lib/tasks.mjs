@@ -211,6 +211,22 @@ export function appendLog(pm, id, { worktree, did, next, date }) {
   return appendLogLine(pm, id, `- ${date} · ${worktree} · did: ${did} · next: ${next}`, date);
 }
 
+// The retro checkpoint: one `retro:` line per day and worktree; ids accumulate, `none` never overrides an id.
+export function appendRetro(pm, id, what, worktree, date) {
+  const task = readTask(pm, id);
+  const head = `- ${date} · ${worktree} · retro: `;
+  const lines = task.body.split('\n');
+  const i = lines.findIndex((l) => l.startsWith(head));
+  if (i === -1) return appendLogLine(pm, id, `${head}${what}`, date);
+  const ids = lines[i].slice(head.length).split(',').map((s) => s.trim()).filter((s) => s && s !== 'none');
+  if (what !== 'none' && !ids.includes(what)) ids.push(what);
+  lines[i] = `${head}${ids.join(', ') || 'none'}`;
+  task.body = lines.join('\n');
+  task.data.updated = date;
+  writeTask(task);
+  return task;
+}
+
 export function lastNext(task) {
   const last = task.body.split('\n').filter((l) => l.includes(' · next: ')).at(-1);
   if (!last) return null;

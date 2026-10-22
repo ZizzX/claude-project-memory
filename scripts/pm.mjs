@@ -18,6 +18,7 @@ import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
 import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
+import { listLearnings, readLearning, addLearning, findLearnings, promoteLearning, retireLearning, retroNone, checkRetro, brief, promoteHint } from './lib/learn.mjs';
 import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -35,6 +36,11 @@ const USAGE = `usage: pm <command>
   prefix [KEY] [--start N]                     show or set the task id prefix (PM → PM-051); --start N: new ids continue from N
   next [<id> | --clear]                        the task the next session starts with (one per epic); claim clears it
   reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close awaiting-merge ones, list the rest (--yes closes the listed, or all)
+  learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]
+                                               record a lesson; a known pattern is counted, not duplicated
+  learn list [--all] | show <id> | find <words…>
+  learn promote <id> --to <file#section> | retire <id> --why "..."
+  learn none <task-id> | check <task-ids>      the retro checkpoint: nothing learned / which tasks still owe one
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -156,6 +162,69 @@ const commands = {
     const id = appendDecision(pm, { title: v.title, why: v.why, rejected: v.rejected, tasks: list(v.tasks), date: today() });
     persist(pm, `pm: decision ${id}`);
     return `${id} recorded`;
+  },
+
+  learn(cwd, [sub, ...args]) {
+    const pm = requireBoard(cwd);
+    const wt = worktreeName(cwd);
+    const subs = {
+      add: () => {
+        const v = strings(args, ['title', 'pattern', 'symptom', 'fix', 'apply', 'tasks']);
+        const r = addLearning(pm, { title: v.title, pattern: v.pattern, symptom: v.symptom, fix: v.fix, apply: v.apply, tasks: list(v.tasks), worktree: wt, date: today() });
+        if (r.created || r.seen) persist(pm, `pm: learn add ${r.id}`);
+        const extra = [];
+        if (r.similar?.length) extra.push(`similar: ${r.similar.join(' · ')} — same lesson? keep one: pm learn retire <id> --why "duplicate of ${r.id}"`);
+        if (r.promote) extra.push(promoteHint(r.id));
+        return [r.note, ...extra].join('\n');
+      },
+      list: () => {
+        const all = parseArgs({ args, options: { all: { type: 'boolean' } } }).values.all;
+        const ls = listLearnings(pm).filter((l) => all || l.data.status === 'active');
+        return ls.map(brief).join('\n') || '(no learnings)';
+      },
+      show: () => {
+        const [id] = args;
+        if (!id) fail('usage: pm learn show L-001');
+        return fs.readFileSync(readLearning(pm, id).file, 'utf8').trimEnd();
+      },
+      find: () => {
+        if (!args.length) fail('usage: pm learn find <words…>');
+        return findLearnings(pm, args).map(brief).join('\n') || '(no match)';
+      },
+      promote: () => {
+        const [id, ...rest] = args;
+        const v = strings(rest, ['to']);
+        if (!id) fail('usage: pm learn promote L-001 --to <file#section>');
+        promoteLearning(pm, id, v.to, today());
+        persist(pm, `pm: learn promote ${id}`);
+        return `${id} promoted to ${v.to} — add a "Source: ${id}" line there`;
+      },
+      retire: () => {
+        const [id, ...rest] = args;
+        const v = strings(rest, ['why']);
+        if (!id) fail('usage: pm learn retire L-001 --why "…"');
+        retireLearning(pm, id, v.why, today());
+        persist(pm, `pm: learn retire ${id}`);
+        return `${id} retired`;
+      },
+      none: () => {
+        const [id] = args;
+        if (!id) fail('usage: pm learn none <task-id>');
+        retroNone(pm, id, wt, today());
+        persist(pm, `pm: learn none ${id}`);
+        return `${id} retro: none`;
+      },
+      check: () => {
+        const ids = args.flatMap(list);
+        if (!ids.length) fail('usage: pm learn check <task-ids>');
+        const missing = checkRetro(pm, ids, today());
+        if (!missing.length) return 'ok';
+        process.exitCode = 1;
+        return `no retro today: ${missing.join(', ')} — pm learn add … --tasks <id> or pm learn none <id>`;
+      },
+    };
+    if (!Object.hasOwn(subs, sub ?? '')) fail('usage: pm learn add | list | show | find | promote | retire | none | check');
+    return subs[sub]();
   },
 
   ready(cwd, args) {
