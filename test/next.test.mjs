@@ -77,3 +77,12 @@ test('an old waiting file gains no waiting_since on an unrelated edit', () => {
   cli(['set', 'T-001', 'order=2'], root);
   assert.doesNotMatch(read(root, 'T-001'), /^waiting_since: /m);
 });
+
+test('pm prefix --start without a key applies to the current prefix', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  const r = cli(['prefix', '--start', '61'], root);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /T-061/);
+  assert.match(cli(['task', 'new', '--title', 'a'], root).out, /^T-061 created/);
+});

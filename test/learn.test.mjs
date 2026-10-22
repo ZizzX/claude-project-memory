@@ -186,3 +186,15 @@ test('unknown task in --tasks writes nothing', () => {
   assert.equal(bad.code, 1);
   assert.equal(parse(learning(root, 'L-001')).data.seen, '1');
 });
+
+test('a same-day no-op still writes the checkpoint for a task recorded on an earlier day', () => {
+  const root = board(2);
+  const dir = path.join(pmDir(root), 'learnings');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'L-001.md'), '---\nid: L-001\ntitle: old\npattern: i18n.missing-key-in-ci\nstatus: active\nseen: 1\nfirst: 2026-01-01\nlast: 2026-01-01\ntasks: [T-002]\npromoted_to: ""\nretired_why: ""\n---\n## Symptom\n\n## Fix\n\n## Apply\n');
+  add(root, ['--tasks', 'T-001']);
+  const r = add(root, ['--tasks', 'T-002']);
+  assert.match(r.out, /already recorded today/);
+  assert.equal(parse(learning(root, 'L-001')).data.seen, '2');
+  assert.equal(cli(['learn', 'check', 'T-001,T-002'], root).out, 'ok');
+});

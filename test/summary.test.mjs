@@ -134,3 +134,14 @@ test('a next mark left on a non-todo task by an older client is ignored', () => 
   fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('status: todo', 'status: in_progress'));
   assert.doesNotMatch(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /← next/);
 });
+
+test('an epic worktree also leads with a repo-wide next task', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'a1', epic: 'A', date: D });
+  claim(pm, 'T-001', 'wt-a', D);
+  for (let i = 2; i <= 4; i += 1) newTask(pm, { title: `a${i}`, epic: 'A', date: D });
+  newTask(pm, { title: 'shared', date: D });
+  setNext(pm, 'T-005', D);
+  assert.match(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /Ready: T-005 shared ← next · T-002 a2 · T-003 a3/);
+});

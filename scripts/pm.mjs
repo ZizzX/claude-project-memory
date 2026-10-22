@@ -265,9 +265,9 @@ const commands = {
 
   prefix(cwd, args) {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { start: { type: 'string' } } });
-    const [key] = positionals;
     const pm = requireBoard(cwd);
-    if (key === undefined) return taskPrefix(pm);
+    const key = positionals[0] ?? taskPrefix(pm); // --start alone applies to the current prefix
+    if (positionals[0] === undefined && values.start === undefined) return key;
     setTaskPrefix(pm, key, values.start === undefined ? undefined : Number(values.start));
     persist(pm, `pm: prefix ${key}${values.start ? ` --start ${values.start}` : ''}`);
     return `task prefix: ${key} — new tasks start at ${idOf(key, nextNumber(pm))}`;

@@ -102,6 +102,7 @@ export function addLearning(pm, { title, pattern, symptom, fix, apply, tasks = [
   if (same) {
     const known = tasks.every((t) => same.data.tasks.includes(t));
     if (same.data.status === 'active' && known && same.data.last === date) {
+      retroLine(pm, tasks, same.id, worktree, date); // the counter stays, the task still gets today's checkpoint
       return { id: same.id, created: false, seen: same.data.seen, tasks: same.data.tasks, note: `${same.id} already recorded today` };
     }
     const reactivated = same.data.status === 'retired';
