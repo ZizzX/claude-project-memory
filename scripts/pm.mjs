@@ -57,6 +57,10 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "waiting for …"                              mark the active task blocked, with the reason
   "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
   /done / "done, only merge left"              close the task: done now, or awaiting merge until its merge closes it
+  /close / "слил" / "wrap up"                  close the session: tasks logged or closed, retro, the next task chosen
+  "what did we learn" / "что узнали нового"    retro: record a lesson (pm learn add) or say there is none (pm learn none)
+  "next session starts with T-007"             pm next: the summary leads with it until it is claimed
+  "audit the board" / "аудит доски"            pm audit: stale tasks, dead worktrees, unused learnings; --fix for the mechanical part
   "the plan changes"                           edit PLAN.md, add a Changelog line and a decision
   "undo that" / "undo the board change"        revert that change of the board itself
   "undo the code of T-007"                     show the undo block, ask, then revert the task's commits

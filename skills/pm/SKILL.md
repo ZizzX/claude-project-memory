@@ -1,6 +1,6 @@
 ---
 name: pm
-description: Project memory for this repo — accepted plan, task board (statuses, order, dependencies), decision log and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "done, only merge left", "continue in a new session", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "add the pm alias", "update the plugin", "later", "never", "update it yourself" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "готово, закрываем", "продолжим в новой сессии", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску", "добавь алиас pm", "обнови плагин", "позже", "не напоминай", "обновляй сам"); when a task is finished or partially finished; and when a plan from another tool was just written.
+description: Project memory for this repo — plan, task board, decision log, learnings and session handoff that survive across sessions and worktrees. Use when starting or resuming work; when the user says "what's next", "take the next one", "break it down", "remember …", "we're done", "done, only merge left", "continue in a new session", "close the session", "wrap up", "what did we learn", "next session starts with …", "audit the board", "the plan changes", "waiting for …", "undo that", "undo the code of T-007", "go back to the state before T-007", "enable board sync", "connect the board", "add the pm alias", "update the plugin", "later", "never", "update it yourself" (Russian: "что дальше", "бери следующую", "разбей", "запомни", "закончили", "готово, закрываем", "слил", "закрой сессию", "продолжим в новой сессии", "что узнали нового", "в следующей сессии берём …", "аудит доски", "план меняется", "ждём", "отмени правку доски", "откати код T-007", "вернись к состоянию до T-007", "включи синхронизацию доски", "подключи доску", "добавь алиас pm", "обнови плагин", "позже", "не напоминай", "обновляй сам"); when a task is finished or partially finished; and when a plan from another tool was just written.
 ---
 
 # pm — project memory
@@ -16,6 +16,7 @@ command to run the CLI; below it is written as `pm`. Run it from inside the proj
 | `PLAN.md` | the repository's goal and milestones, `## Current focus` as one line per epic (`- KEY: what is happening now`), `## Changelog`. Shared by every worktree and direction — never touch another epic's lines | edit in place, then append `- <date> · <what changed> · <why> · D-NNN` to Changelog |
 | `tasks/T-NNN.md` (or `<PREFIX>-NNN.md` after `pm prefix`; old ids keep theirs, the number continues) | frontmatter + `## Goal`, `## Understanding`, `## Checklist`, `## Log` | CLI for frontmatter and Log; edit Goal / Understanding / Checklist directly |
 | `decisions.md` | append-only `## D-NNN · date · title` entries | `pm decision` only |
+| `learnings/L-NNN.md` | a lesson of this project: `pattern: area.symptom`, `seen`, `tasks`, then `## Symptom`, `## Fix`, `## Apply` | `pm learn` for frontmatter and creation; edit the prose directly |
 | `memory/` | Claude Code auto-memory (only when sync is on) | as usual |
 | `BOARD.md`, `board.html` | generated views | never edit |
 
@@ -43,7 +44,13 @@ into the board's Archive by itself; there is nothing to close.
 | `/done`, "done, only merge left", "готово, закрываем" | Follow `/done` (commands/done.md): check the verdict against the definition of done above, then `pm done`. |
 | `Merged, still open: …` in the summary | These tasks were merged but are not closed. Ask the user about each; close only the ones confirmed: `pm reconcile --yes T-001,T-004` (a bare `--yes` closes every listed one). Never close them on your own. `PR conflict: …` → run `pm reconcile` and show its fix line. `Closed after merge: …` → just mention it. |
 | The plugin was just updated to a version with `pm reconcile` (first session after it) | Run `pm reconcile` once, so tasks merged earlier but never closed are listed; then ask as above. |
+| `/close`, "слил", "закрой сессию", "close the session", "wrap up" | Follow `/close` (commands/close.md): every task of this worktree closed or logged with a `next:`, the `retro` skill with `pm learn check` as its gate, `pm next` for the task the next session starts with, then the four wrap-up lines. |
 | "we're done", "continue in a new session" | For every in-progress task of this worktree: `pm log T-NNN --did "…" --next "<exact next step>"`. Update `## Current focus` if it moved. Tell the user `/clear` is safe — the next session starts from the summary. |
+| "what did we learn", "что узнали нового", a lesson surfaced mid-task | The `retro` skill: `pm learn find <word>` first, then `pm learn add --title … --pattern area.symptom --symptom … --fix … --apply … --tasks T-NNN`, or `pm learn none T-NNN` when there is nothing. Learnings are project lessons; a fact about the user still goes to auto-memory. |
+| "next session starts with T-007", "в следующей сессии берём T-007" | `pm next T-007` — a `todo` task, one per epic; the summary's `Ready:` leads with it until it is claimed. |
+| `Learnings: …` in the summary | Read them before touching that area; `pm learn show L-NNN` for the fix. When one proved wrong: `pm learn retire L-NNN --why "…"`. |
+| `Promote: L-003 …` in the summary | Propose the one-paragraph rule and its target (the repo's CLAUDE.md/AGENTS.md or the skill of that area). Only after the user says yes: write it there with a trailing `Source: L-003` line, then `pm learn promote L-003 --to <file#section>`. Never promote on your own. |
+| `[pm] audit: N findings` in the summary, "audit the board", "аудит доски" | `pm audit` — show the lines; `pm audit --fix` only touches dead worktree entries, stale `next` marks and old state files. Everything else (stuck, waiting, orphans, unused learnings, missing retros) is a question to the user, answered with the command each line names. |
 | "remember …" | Exactly one place: a decision → `pm decision`; a durable fact about the user or project → auto-memory; a detail of a task → that task's `## Understanding`. |
 | "the plan changes" | Edit `PLAN.md` — only your epic's focus line and your own sections — append a Changelog line, record a decision. |
 | "waiting for …" | `pm set T-NNN status=waiting waiting_on="…"`. |
@@ -82,12 +89,18 @@ pm set T-003 key=value ...                      status, order, depends_on, waiti
 pm claim T-003                                  attach this worktree, status in_progress (a review task keeps review)
 pm log T-003 --did "..." --next "..."           append a Log entry
 pm done T-003 [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
+pm next T-003 | pm next --clear                 the task the next session starts with (one per epic; claim clears it)
+pm learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]
+pm learn list [--all] | show L-001 | find <words…>
+pm learn promote L-001 --to <file#section> | retire L-001 --why "…"
+pm learn none T-003 | check T-003,T-004        the retro checkpoint: nothing learned / who still owes one
+pm audit [--fix]                                stale tasks, dead worktrees, unused learnings; --fix: the mechanical part
 pm reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close review ones, list the rest (--yes closes the listed, or all)
 pm show T-003                                   branch, MR/PR, timeline, commits, decisions, dependents, undo block
 pm decision --title T --why W --rejected R [--tasks T-001]
 pm ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), of one epic, or all
 pm epics                                        every epic: open/total and its focus line
-pm prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids keep theirs
+pm prefix [KEY] [--start N]                     show or set the task id prefix (PM → PM-051); --start: new ids continue from N
 pm validate | pm board | pm summary | pm scan | pm help
 pm sync on [--remote url] [--yes] | pm sync off | pm sync
 pm alias                                        add pm to this machine's shell profiles (PowerShell, bash, zsh)

@@ -107,3 +107,9 @@ test('pm ready lists the next task first', () => {
   cli(['next', 'T-002'], root);
   assert.match(cli(['ready'], root).out, /^T-002 b ← next\nT-001 a$/m);
 });
+
+test('pm help names learn, next, audit and the close phrases', () => {
+  const { root } = setup();
+  const { out } = cli(['help'], root);
+  for (const re of [/^\s+learn add /m, /^\s+next \[/m, /^\s+audit \[--fix\]/m, /\/close/, /"what did we learn"/, /"слил"/]) assert.match(out, re);
+});
