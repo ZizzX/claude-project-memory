@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { tmp } from './helpers.mjs';
-import { newTask, setFields, claim, appendLog } from '../scripts/lib/tasks.mjs';
+import { newTask, setFields, claim, appendLog, setNext } from '../scripts/lib/tasks.mjs';
 import { planFile, planTemplate } from '../scripts/lib/plan.mjs';
 import { appendDecision } from '../scripts/lib/decisions.mjs';
 import { buildSummary, MAX_LINES } from '../scripts/lib/summary.mjs';
@@ -48,4 +48,30 @@ test('summary never exceeds MAX_LINES and keeps the rules', () => {
   assert.ok(lines.length <= MAX_LINES, `${lines.length} lines`);
   assert.match(lines.at(-2), /^Rules:/);
   assert.match(lines.join('\n'), /more lines — see BOARD\.md/);
+});
+
+test('summary puts the next task first', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'a', date: D });
+  newTask(pm, { title: 'b', date: D });
+  setNext(pm, 'T-002', D);
+  assert.match(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /Ready: T-002 b ← next · T-001 a/);
+});
+
+test('a blocked next task says what it waits for', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'a', date: D });
+  newTask(pm, { title: 'b', deps: ['T-001'], date: D });
+  setNext(pm, 'T-002', D);
+  assert.match(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /Ready: T-002 b ← next \(after T-001\) · T-001 a/);
+});
+
+test('an orphan in_progress task prints (no worktree)', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'c', date: D });
+  setFields(pm, 'T-001', { status: 'in_progress' }, D);
+  assert.match(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /Elsewhere: T-001 c @ \(no worktree\)/);
 });

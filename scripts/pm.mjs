@@ -169,7 +169,8 @@ const commands = {
     const head = epic
       ? `# epic ${epic} · pm ready --all for every direction`
       : hasEpics && !v.all ? '# no epic for this worktree yet — start yours with: pm task new --epic KEY' : '';
-    const body = byEpic(readyQueue(all), epic).map((t) => `${t.id} ${t.data.title}${!epic && t.data.epic ? ` (${t.data.epic})` : ''}`).join('\n') || '(nothing ready)';
+    const queue = byEpic(readyQueue(all), epic).sort((a, b) => Boolean(b.data.next) - Boolean(a.data.next));
+    const body = queue.map((t) => `${t.id} ${t.data.title}${!epic && t.data.epic ? ` (${t.data.epic})` : ''}${t.data.next ? ' ← next' : ''}`).join('\n') || '(nothing ready)';
     return head ? `${head}\n${body}` : body;
   },
 

@@ -98,3 +98,12 @@ test('cli: help lists the commands and the phrases to say, and exits 0', () => {
   }
   assert.equal(fs.existsSync(pmDir(root)), false, '`pm init --help` must not create a board');
 });
+
+test('pm ready lists the next task first', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a'], root);
+  cli(['task', 'new', '--title', 'b'], root);
+  cli(['next', 'T-002'], root);
+  assert.match(cli(['ready'], root).out, /^T-002 b ← next\nT-001 a$/m);
+});

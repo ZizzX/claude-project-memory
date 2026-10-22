@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { listTasks, readyQueue, lastNext, isOpen, byEpic, activeEpic } from './tasks.mjs';
+import { listTasks, readyQueue, lastNext, isOpen, byEpic, activeEpic, nextTask } from './tasks.mjs';
 import { recentDecisions } from './decisions.mjs';
 import { projectName, currentFocus } from './plan.mjs';
 import { parsePrUrl } from './forge.mjs';
@@ -18,6 +18,14 @@ const firstPerEpic = (list) => {
   return list.filter((t) => !seen.has(t.data.epic) && seen.add(t.data.epic));
 };
 
+// The next task leads the Ready line even when its dependencies are still open — then it says which.
+export function nextTag(t, tasks) {
+  if (!t.data.next) return '';
+  const status = new Map(tasks.map((x) => [x.id, x.data.status]));
+  const open = t.data.depends_on.filter((d) => !['done', 'dropped'].includes(status.get(d)));
+  return open.length ? ` ← next (after ${open.join(', ')})` : ' ← next';
+}
+
 // merge: what SessionStart learned from local refs and the merge cache (mergeAtStart), or null.
 export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks = listTasks(pm), merge = null }) {
   const keys = new Set(tasks.map((t) => t.data.epic).filter(Boolean));
@@ -28,7 +36,8 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   // Own epic: its queue. No epic on a board that has some: the top task of each, so a fresh worktree sees the directions.
   const perEpic = (list) => (epic ? byEpic(list, epic) : epics.length ? firstPerEpic(list) : list);
   const queue = readyQueue(tasks);
-  const ready = perEpic(queue).slice(0, 3);
+  const nx = epic || !epics.length ? nextTask(tasks, epic) : null;
+  const ready = [nx, ...perEpic(queue).filter((t) => t !== nx)].filter(Boolean).slice(0, 3);
   const others = epic ? queue.length - perEpic(queue).length : 0;
   // Waiting tasks of my epic, plus the ones my tasks depend on directly: a cross-epic blocker is still my blocker.
   const scope = byEpic(tasks, epic);
@@ -46,8 +55,8 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
     const n = lastNext(t);
     lines.push(`  ${t.id} ${t.data.title}${tag(t, epic)} [${t.data.status}]${n ? ` → next: ${n.next} (${n.date}, ${n.who})` : ''}`);
   }
-  if (elsewhere.length) lines.push(`Elsewhere: ${elsewhere.map((t) => `${t.id} ${t.data.title} @ ${t.data.worktrees.join(', ')}`).join(' · ')}`);
-  lines.push(`Ready: ${ready.map((t) => `${t.id} ${t.data.title}${tag(t, epic)}`).join(' · ') || '—'}${others ? ` · +${others} in other epics (pm ready --all)` : ''}`);
+  if (elsewhere.length) lines.push(`Elsewhere: ${elsewhere.map((t) => `${t.id} ${t.data.title} @ ${t.data.worktrees.join(', ') || '(no worktree)'}`).join(' · ')}`);
+  lines.push(`Ready: ${ready.map((t) => `${t.id} ${t.data.title}${tag(t, epic)}${nextTag(t, tasks)}`).join(' · ') || '—'}${others ? ` · +${others} in other epics (pm ready --all)` : ''}`);
   if (waiting.length) lines.push(`Waiting: ${waiting.map((t) => `${t.id}${tag(t, epic)} ← ${t.data.waiting_on}`).join(' · ')}`);
   if (merge?.closed.length) lines.push(`Closed after merge: ${merge.closed.join(', ')}`);
   if (awaiting.length) {
