@@ -4,6 +4,7 @@ import { listTasks, readyQueue, lastNext, isOpen, byEpic, activeEpic, nextTask }
 import { recentDecisions } from './decisions.mjs';
 import { projectName, currentFocus } from './plan.mjs';
 import { parsePrUrl } from './forge.mjs';
+import { listLearnings, promotable } from './learn.mjs';
 
 export const MAX_LINES = 40;
 export const RULES = [
@@ -46,6 +47,12 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   const waiting = (epic || !epics.length ? blocked : firstPerEpic(blocked)).slice(0, 5);
   const awaiting = byEpic(tasks, epic).filter((t) => t.data.status === 'review').slice(0, 5);
   const decisions = recentDecisions(pm, 3);
+  // Learnings: frontmatter only. Those of this direction's tasks first; a board without one shows the freshest.
+  const active = listLearnings(pm).filter((l) => l.data.status === 'active');
+  const ids = new Set(scope.map((t) => t.id));
+  const ofScope = active.filter((l) => l.data.tasks.some((id) => ids.has(id)));
+  const learnings = (ofScope.length ? ofScope : active).sort((a, b) => b.data.last.localeCompare(a.data.last) || a.id.localeCompare(b.id)).slice(0, 5);
+  const promote = active.filter(promotable).slice(0, 5);
 
   const lines = [`[pm] ${projectName(pm)}${epic ? ` · epic ${epic}` : ''} · focus: ${currentFocus(pm, epic, keys) || '—'} · board: ${pathToFileURL(path.join(pm, 'board.html')).href}`];
   if (statusLine) lines.push(...statusLine.split('\n')); // sync/board status and the update notice are separate lines
@@ -73,6 +80,8 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
     lines.push(`Epics: ${epics.map((e) => `${e} ${of(e).filter(isOpen).length}/${of(e).length}`).join(' · ')}`);
   }
   if (decisions.length) lines.push(`Decisions: ${decisions.map((d) => `${d.id} ${d.title}`).join(' · ')}`);
+  if (learnings.length) lines.push(`Learnings: ${learnings.map((l) => `${l.id} ${l.data.title}`).join(' · ')}`);
+  if (promote.length) lines.push(`Promote: ${promote.map((l) => `${l.id} ${l.data.title} (seen ${l.data.seen} in ${new Set(l.data.tasks).size} tasks)`).join(' · ')} — propose the rule and its target file, pm learn promote after the user agrees`);
 
   const tail = [`CLI: node "${scriptPath}" <command>`, ...RULES];
   const room = MAX_LINES - tail.length;
