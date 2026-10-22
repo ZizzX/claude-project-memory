@@ -19,6 +19,7 @@ import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memory
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
 import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
 import { listLearnings, readLearning, addLearning, findLearnings, promoteLearning, retireLearning, retroNone, checkRetro, brief, promoteHint } from './lib/learn.mjs';
+import { runAudit, findingLine } from './lib/audit.mjs';
 import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -41,6 +42,7 @@ const USAGE = `usage: pm <command>
   learn list [--all] | show <id> | find <words…>
   learn promote <id> --to <file#section> | retire <id> --why "..."
   learn none <task-id> | check <task-ids>      the retro checkpoint: nothing learned / which tasks still owe one
+  audit [--fix]                                what went stale (stuck, waiting, orphans, unused learnings…); --fix: the mechanical part
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -280,6 +282,15 @@ const commands = {
     const t = setNext(pm, id, today());
     persist(pm, `pm: next ${id}`);
     return `${id} ← next (${t.data.epic || 'repo-wide'}): the next session starts with it`;
+  },
+
+  audit(cwd, args) {
+    const fix = parseArgs({ args, options: { fix: { type: 'boolean' } } }).values.fix;
+    const pm = requireBoard(cwd);
+    const { findings, fixed } = runAudit({ pm, cwd, fix });
+    if (fixed.length) writeBoard(pm);
+    const lines = [...findings.map(findingLine), ...fixed.map((f) => `fixed: ${f}`)];
+    return lines.join('\n') || 'audit: clean';
   },
 
   validate(cwd) {

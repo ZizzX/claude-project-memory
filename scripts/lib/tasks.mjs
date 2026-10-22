@@ -227,6 +227,12 @@ export function appendRetro(pm, id, what, worktree, date) {
   return task;
 }
 
+const LOG_RE = /^- (\d{4}-\d{2}-\d{2}) · /;
+const logDates = (task, filter) => task.body.split('\n').filter((l) => LOG_RE.test(l) && filter(l)).map((l) => l.match(LOG_RE)[1]);
+// Date of the last Log line a person (or the agent) wrote — auto notes from hooks do not count.
+export const lastManualLogDate = (task) => logDates(task, (l) => / · did: /.test(l)).at(-1) ?? null;
+export const lastLogDate = (task) => logDates(task, () => true).at(-1) ?? null;
+
 export function lastNext(task) {
   const last = task.body.split('\n').filter((l) => l.includes(' · next: ')).at(-1);
   if (!last) return null;
