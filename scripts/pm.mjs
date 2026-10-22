@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf } from './lib/tasks.mjs';
+import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -32,7 +32,8 @@ const USAGE = `usage: pm <command>
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
-  prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids stay as they are
+  prefix [KEY] [--start N]                     show or set the task id prefix (PM → PM-051); --start N: new ids continue from N
+  next [<id> | --clear]                        the task the next session starts with (one per epic); claim clears it
   reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close awaiting-merge ones, list the rest (--yes closes the listed, or all)
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
@@ -186,12 +187,29 @@ const commands = {
     }).join('\n');
   },
 
-  prefix(cwd, [key]) {
+  prefix(cwd, args) {
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { start: { type: 'string' } } });
+    const [key] = positionals;
     const pm = requireBoard(cwd);
     if (key === undefined) return taskPrefix(pm);
-    setTaskPrefix(pm, key);
-    persist(pm, `pm: prefix ${key}`);
+    setTaskPrefix(pm, key, values.start === undefined ? undefined : Number(values.start));
+    persist(pm, `pm: prefix ${key}${values.start ? ` --start ${values.start}` : ''}`);
     return `task prefix: ${key} — new tasks start at ${idOf(key, nextNumber(pm))}`;
+  },
+
+  next(cwd, args) {
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { clear: { type: 'boolean' } } });
+    const [id] = positionals;
+    if (Boolean(id) === Boolean(values.clear)) fail('usage: pm next <id> | pm next --clear');
+    const pm = requireBoard(cwd);
+    if (values.clear) {
+      clearNext(pm);
+      persist(pm, 'pm: next --clear');
+      return 'next cleared';
+    }
+    const t = setNext(pm, id, today());
+    persist(pm, `pm: next ${id}`);
+    return `${id} ← next (${t.data.epic || 'repo-wide'}): the next session starts with it`;
   },
 
   validate(cwd) {

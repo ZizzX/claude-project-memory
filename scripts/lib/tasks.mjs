@@ -14,12 +14,17 @@ export const tasksDir = (pm) => path.join(pm, 'tasks');
 
 // config.json lives in the board, so every machine that syncs the board uses the same prefix.
 const configFile = (pm) => path.join(pm, 'config.json');
-function readConfig(pm) {
+export function boardConfig(pm) {
   try {
     return JSON.parse(fs.readFileSync(configFile(pm), 'utf8'));
   } catch {
     return {};
   }
+}
+const readConfig = boardConfig;
+
+export function writeConfig(pm, patch) {
+  fs.writeFileSync(configFile(pm), `${JSON.stringify({ ...boardConfig(pm), ...patch }, null, 2)}\n`);
 }
 
 function checkPrefix(prefix) {
@@ -30,9 +35,11 @@ function checkPrefix(prefix) {
 // Checked on read as well: config.json comes in with board sync, and the prefix becomes part of a file name.
 export const taskPrefix = (pm) => checkPrefix(readConfig(pm).taskPrefix || 'T');
 
-export function setTaskPrefix(pm, prefix) {
+// start: the first number new ids may use (config.startNumber) — for a board whose history already names ids.
+export function setTaskPrefix(pm, prefix, start) {
   checkPrefix(prefix);
-  fs.writeFileSync(configFile(pm), `${JSON.stringify({ ...readConfig(pm), taskPrefix: prefix }, null, 2)}\n`);
+  if (start !== undefined && (!Number.isInteger(start) || start < 1)) throw new Error(`--start must be a whole number ≥ 1, got "${start}"`);
+  writeConfig(pm, { taskPrefix: prefix, ...(start !== undefined && { startNumber: start }) });
 }
 
 const toArray = (v) => (Array.isArray(v) ? v : v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : []);
@@ -85,7 +92,8 @@ export function writeTask(task) {
 export function nextNumber(pm) {
   const dir = tasksDir(pm);
   const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-  return Math.max(0, ...files.map((f) => Number(f.match(ID_RE)?.[1] ?? 0))) + 1;
+  const floor = Number(readConfig(pm).startNumber) || 1;
+  return Math.max(floor, ...files.map((f) => Number(f.match(ID_RE)?.[1] ?? 0) + 1));
 }
 
 export const idOf = (prefix, n) => `${prefix}-${String(n).padStart(3, '0')}`;
@@ -141,6 +149,10 @@ export function setFields(pm, id, fields, date) {
   }
   if ('status' in fields && fields.status !== 'waiting' && !('waiting_on' in fields)) task.data.waiting_on = '';
   if ('status' in fields && fields.status !== 'review' && !('review_at' in fields)) delete task.data.review_at;
+  // next is a promise for a todo task; any other status has already answered it.
+  if (task.data.status !== 'todo') delete task.data.next;
+  if (task.data.status === 'waiting') task.data.waiting_since ??= date;
+  else delete task.data.waiting_since;
   // Set by hand, review still needs its start: a merge before it is an earlier PR, a merge after it closes the task.
   if (task.data.status === 'review' && !task.data.review_at) task.data.review_at = new Date().toISOString();
   if (task.data.status === 'waiting' && !task.data.waiting_on) {
@@ -150,6 +162,33 @@ export function setFields(pm, id, fields, date) {
   writeTask(task);
   return task;
 }
+
+// One next task per epic: the task's own epic key ('' = the repo-wide group), never the worktree's.
+export function setNext(pm, id, date) {
+  const task = readTask(pm, id);
+  if (task.data.status !== 'todo') throw new Error(`${id} is ${task.data.status} — only a todo task can be next`);
+  for (const t of listTasks(pm)) {
+    if (t.id !== id && t.data.next && t.data.epic === task.data.epic) {
+      delete t.data.next;
+      writeTask(t);
+    }
+  }
+  task.data.next = date;
+  task.data.updated = date;
+  writeTask(task);
+  return task;
+}
+
+export function clearNext(pm, id) {
+  for (const t of listTasks(pm)) {
+    if (t.data.next && (!id || t.id === id)) {
+      delete t.data.next;
+      writeTask(t);
+    }
+  }
+}
+
+export const nextTask = (tasks, epic = '') => tasks.find((t) => t.data.next && t.data.epic === epic);
 
 export function claim(pm, id, worktree, date, branch = '') {
   const task = readTask(pm, id);
