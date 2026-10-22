@@ -11,6 +11,7 @@ import { pull, conflictFiles, unpushedOverDay, sharedBoardHint, linkMemory, memo
 import { updateLine } from './update.mjs';
 import { mergeAtStart } from './merged.mjs';
 import { CLOSED_PREFIX } from './show.mjs';
+import { auditLine } from './audit.mjs';
 
 // ponytail: one global threshold; per-project config only if users ask for it.
 export const STALE_MINUTES = 20;
@@ -105,7 +106,13 @@ export function onSessionStart(input, cwd) {
   // Keying state as "undefined" pools unrelated runs into one window; the summary still prints.
   if (input.session_id) writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
   const notice = updateLine({ pm, cwd }); // never blocks: local sources plus the cached network result
-  const statusLine = [status, notice].filter(Boolean).join('\n');
+  let audit = '';
+  try {
+    audit = auditLine(pm, cwd); // a weekly count; a failure here is not worth a missing summary
+  } catch (e) {
+    if (process.env.PM_DEBUG) console.error(e);
+  }
+  const statusLine = [status, notice, audit].filter(Boolean).join('\n');
   return buildSummary({ pm, worktree: worktreeName(cwd), scriptPath: PM_SCRIPT, statusLine, tasks, merge });
 }
 

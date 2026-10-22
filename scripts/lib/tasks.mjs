@@ -14,12 +14,17 @@ export const tasksDir = (pm) => path.join(pm, 'tasks');
 
 // config.json lives in the board, so every machine that syncs the board uses the same prefix.
 const configFile = (pm) => path.join(pm, 'config.json');
-function readConfig(pm) {
+export function boardConfig(pm) {
   try {
     return JSON.parse(fs.readFileSync(configFile(pm), 'utf8'));
   } catch {
     return {};
   }
+}
+const readConfig = boardConfig;
+
+export function writeConfig(pm, patch) {
+  fs.writeFileSync(configFile(pm), `${JSON.stringify({ ...boardConfig(pm), ...patch }, null, 2)}\n`);
 }
 
 function checkPrefix(prefix) {
@@ -30,9 +35,11 @@ function checkPrefix(prefix) {
 // Checked on read as well: config.json comes in with board sync, and the prefix becomes part of a file name.
 export const taskPrefix = (pm) => checkPrefix(readConfig(pm).taskPrefix || 'T');
 
-export function setTaskPrefix(pm, prefix) {
+// start: the first number new ids may use (config.startNumber) — for a board whose history already names ids.
+export function setTaskPrefix(pm, prefix, start) {
   checkPrefix(prefix);
-  fs.writeFileSync(configFile(pm), `${JSON.stringify({ ...readConfig(pm), taskPrefix: prefix }, null, 2)}\n`);
+  if (start !== undefined && (!Number.isInteger(start) || start < 1)) throw new Error(`--start must be a whole number ≥ 1, got "${start}"`);
+  writeConfig(pm, { taskPrefix: prefix, ...(start !== undefined && { startNumber: start }) });
 }
 
 const toArray = (v) => (Array.isArray(v) ? v : v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : []);
@@ -85,7 +92,8 @@ export function writeTask(task) {
 export function nextNumber(pm) {
   const dir = tasksDir(pm);
   const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-  return Math.max(0, ...files.map((f) => Number(f.match(ID_RE)?.[1] ?? 0))) + 1;
+  const floor = Number(readConfig(pm).startNumber) || 1;
+  return Math.max(floor, ...files.map((f) => Number(f.match(ID_RE)?.[1] ?? 0) + 1));
 }
 
 export const idOf = (prefix, n) => `${prefix}-${String(n).padStart(3, '0')}`;
@@ -128,6 +136,7 @@ export function newTask(pm, { title, order, deps = [], milestone = '', epic = ''
 
 export function setFields(pm, id, fields, date) {
   const task = readTask(pm, id);
+  const wasWaiting = task.data.status === 'waiting';
   for (const [k, v] of Object.entries(fields)) {
     if (k === 'id') throw new Error('id cannot be changed');
     if (k === 'status' && !STATUSES.includes(v)) throw new Error(`bad status "${v}"; use ${STATUSES.join(' | ')}`);
@@ -141,6 +150,10 @@ export function setFields(pm, id, fields, date) {
   }
   if ('status' in fields && fields.status !== 'waiting' && !('waiting_on' in fields)) task.data.waiting_on = '';
   if ('status' in fields && fields.status !== 'review' && !('review_at' in fields)) delete task.data.review_at;
+  // next is a promise for a todo task; any other status has already answered it.
+  if (task.data.status !== 'todo') delete task.data.next;
+  if (task.data.status !== 'waiting') delete task.data.waiting_since;
+  else if (!wasWaiting) task.data.waiting_since = date; // a 0.10 file already waiting keeps no date: the audit falls back to updated
   // Set by hand, review still needs its start: a merge before it is an earlier PR, a merge after it closes the task.
   if (task.data.status === 'review' && !task.data.review_at) task.data.review_at = new Date().toISOString();
   if (task.data.status === 'waiting' && !task.data.waiting_on) {
@@ -150,6 +163,33 @@ export function setFields(pm, id, fields, date) {
   writeTask(task);
   return task;
 }
+
+// One next task per epic: the task's own epic key ('' = the repo-wide group), never the worktree's.
+export function setNext(pm, id, date) {
+  const task = readTask(pm, id);
+  if (task.data.status !== 'todo') throw new Error(`${id} is ${task.data.status} — only a todo task can be next`);
+  for (const t of listTasks(pm)) {
+    if (t.id !== id && t.data.next && t.data.epic === task.data.epic) {
+      delete t.data.next;
+      writeTask(t);
+    }
+  }
+  task.data.next = date;
+  task.data.updated = date;
+  writeTask(task);
+  return task;
+}
+
+export function clearNext(pm, id) {
+  for (const t of listTasks(pm)) {
+    if (t.data.next && (!id || t.id === id)) {
+      delete t.data.next;
+      writeTask(t);
+    }
+  }
+}
+
+export const nextTask = (tasks, epic = '') => tasks.find((t) => t.data.next && t.data.status === 'todo' && t.data.epic === epic);
 
 export function claim(pm, id, worktree, date, branch = '') {
   const task = readTask(pm, id);
@@ -171,6 +211,28 @@ export function appendLogLine(pm, id, line, date) {
 export function appendLog(pm, id, { worktree, did, next, date }) {
   return appendLogLine(pm, id, `- ${date} · ${worktree} · did: ${did} · next: ${next}`, date);
 }
+
+// The retro checkpoint: one `retro:` line per day and worktree; ids accumulate, `none` never overrides an id.
+export function appendRetro(pm, id, what, worktree, date) {
+  const task = readTask(pm, id);
+  const head = `- ${date} · ${worktree} · retro: `;
+  const lines = task.body.split('\n');
+  const i = lines.findIndex((l) => l.startsWith(head));
+  if (i === -1) return appendLogLine(pm, id, `${head}${what}`, date);
+  const ids = lines[i].slice(head.length).split(',').map((s) => s.trim()).filter((s) => s && s !== 'none');
+  if (what !== 'none' && !ids.includes(what)) ids.push(what);
+  lines[i] = `${head}${ids.join(', ') || 'none'}`;
+  task.body = lines.join('\n');
+  task.data.updated = date;
+  writeTask(task);
+  return task;
+}
+
+const LOG_RE = /^- (\d{4}-\d{2}-\d{2}) · /;
+const logDates = (task, filter) => task.body.split('\n').filter((l) => LOG_RE.test(l) && filter(l)).map((l) => l.match(LOG_RE)[1]);
+// Date of the last Log line a person (or the agent) wrote — auto notes from hooks do not count.
+export const lastManualLogDate = (task) => logDates(task, (l) => / · did: /.test(l)).at(-1) ?? null;
+export const lastLogDate = (task) => logDates(task, () => true).at(-1) ?? null;
 
 export function lastNext(task) {
   const last = task.body.split('\n').filter((l) => l.includes(' · next: ')).at(-1);

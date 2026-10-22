@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf } from './lib/tasks.mjs';
+import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -18,6 +18,8 @@ import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
 import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
+import { listLearnings, readLearning, addLearning, findLearnings, promoteLearning, retireLearning, retroNone, checkRetro, brief, promoteHint } from './lib/learn.mjs';
+import { runAudit, findingLine } from './lib/audit.mjs';
 import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, setMode, snooze, SNOOZE_DAYS, MODES } from './lib/update.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -32,8 +34,15 @@ const USAGE = `usage: pm <command>
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
-  prefix [KEY]                                 show or set the task id prefix (PM → PM-051); old ids stay as they are
+  prefix [KEY] [--start N]                     show or set the task id prefix (PM → PM-051); --start N: new ids continue from N
+  next [<id> | --clear]                        the task the next session starts with (one per epic); claim clears it
   reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close awaiting-merge ones, list the rest (--yes closes the listed, or all)
+  learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]
+                                               record a lesson; a known pattern is counted, not duplicated
+  learn list [--all] | show <id> | find <words…>
+  learn promote <id> --to <file#section> | retire <id> --why "..."
+  learn none <task-id> | check <task-ids>      the retro checkpoint: nothing learned / which tasks still owe one
+  audit [--fix]                                what went stale (stuck, waiting, orphans, unused learnings…); --fix: the mechanical part
   validate | board | summary | scan
   sync [on [--remote url] [--yes] | off]       opt-in sync of board and memory across machines
   update [later | never | auto | ask]          update notice: snooze it for ${SNOOZE_DAYS} days, or set how it behaves
@@ -48,6 +57,10 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "waiting for …"                              mark the active task blocked, with the reason
   "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
   /done / "done, only merge left"              close the task: done now, or awaiting merge until its merge closes it
+  /close / "слил" / "wrap up"                  close the session: tasks logged or closed, retro, the next task chosen
+  "what did we learn" / "что узнали нового"    retro: record a lesson (pm learn add) or say there is none (pm learn none)
+  "next session starts with T-007"             pm next: the summary leads with it until it is claimed
+  "audit the board" / "аудит доски"            pm audit: stale tasks, dead worktrees, unused learnings; --fix for the mechanical part
   "the plan changes"                           edit PLAN.md, add a Changelog line and a decision
   "undo that" / "undo the board change"        revert that change of the board itself
   "undo the code of T-007"                     show the undo block, ask, then revert the task's commits
@@ -58,7 +71,7 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "update it yourself, do not ask"             pm.updateNotify=auto — Claude installs new versions and reports them
 After creating an MR/PR for a task: pm set T-NNN pr=<url> — pm show then reads its state and merge SHA.
 Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme
-Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/claude-project-memory#ending-a-session`;
+Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/claude-project-memory#closing-a-session`;
 
 class UsageError extends Error {}
 const fail = (msg) => {
@@ -157,6 +170,69 @@ const commands = {
     return `${id} recorded`;
   },
 
+  learn(cwd, [sub, ...args]) {
+    const pm = requireBoard(cwd);
+    const wt = worktreeName(cwd);
+    const subs = {
+      add: () => {
+        const v = strings(args, ['title', 'pattern', 'symptom', 'fix', 'apply', 'tasks']);
+        const r = addLearning(pm, { title: v.title, pattern: v.pattern, symptom: v.symptom, fix: v.fix, apply: v.apply, tasks: list(v.tasks), worktree: wt, date: today() });
+        if (r.created || r.seen) persist(pm, `pm: learn add ${r.id}`);
+        const extra = [];
+        if (r.similar?.length) extra.push(`similar: ${r.similar.join(' · ')} — same lesson? keep one: pm learn retire <id> --why "duplicate of ${r.id}"`);
+        if (r.promote) extra.push(promoteHint(r.id));
+        return [r.note, ...extra].join('\n');
+      },
+      list: () => {
+        const all = parseArgs({ args, options: { all: { type: 'boolean' } } }).values.all;
+        const ls = listLearnings(pm).filter((l) => all || l.data.status === 'active');
+        return ls.map(brief).join('\n') || '(no learnings)';
+      },
+      show: () => {
+        const [id] = args;
+        if (!id) fail('usage: pm learn show L-001');
+        return fs.readFileSync(readLearning(pm, id).file, 'utf8').trimEnd();
+      },
+      find: () => {
+        if (!args.length) fail('usage: pm learn find <words…>');
+        return findLearnings(pm, args).map(brief).join('\n') || '(no match)';
+      },
+      promote: () => {
+        const [id, ...rest] = args;
+        const v = strings(rest, ['to']);
+        if (!id) fail('usage: pm learn promote L-001 --to <file#section>');
+        promoteLearning(pm, id, v.to, today());
+        persist(pm, `pm: learn promote ${id}`);
+        return `${id} promoted to ${v.to} — add a "Source: ${id}" line there`;
+      },
+      retire: () => {
+        const [id, ...rest] = args;
+        const v = strings(rest, ['why']);
+        if (!id) fail('usage: pm learn retire L-001 --why "…"');
+        retireLearning(pm, id, v.why, today());
+        persist(pm, `pm: learn retire ${id}`);
+        return `${id} retired`;
+      },
+      none: () => {
+        const [id] = args;
+        if (!id) fail('usage: pm learn none <task-id>');
+        retroNone(pm, id, wt, today());
+        persist(pm, `pm: learn none ${id}`);
+        return `${id} retro: none`;
+      },
+      check: () => {
+        const ids = args.flatMap(list);
+        if (!ids.length) fail('usage: pm learn check <task-ids>');
+        const missing = checkRetro(pm, ids, today());
+        if (!missing.length) return 'ok';
+        process.exitCode = 1;
+        return `no retro today: ${missing.join(', ')} — pm learn add … --tasks <id> or pm learn none <id>`;
+      },
+    };
+    if (!Object.hasOwn(subs, sub ?? '')) fail('usage: pm learn add | list | show | find | promote | retire | none | check');
+    return subs[sub]();
+  },
+
   ready(cwd, args) {
     const v = parseArgs({ args, options: { epic: { type: 'string' }, all: { type: 'boolean' } } }).values;
     if (v.all && v.epic !== undefined) fail('usage: pm ready [--epic KEY | --all]');
@@ -168,7 +244,8 @@ const commands = {
     const head = epic
       ? `# epic ${epic} · pm ready --all for every direction`
       : hasEpics && !v.all ? '# no epic for this worktree yet — start yours with: pm task new --epic KEY' : '';
-    const body = byEpic(readyQueue(all), epic).map((t) => `${t.id} ${t.data.title}${!epic && t.data.epic ? ` (${t.data.epic})` : ''}`).join('\n') || '(nothing ready)';
+    const queue = byEpic(readyQueue(all), epic).sort((a, b) => Boolean(b.data.next) - Boolean(a.data.next));
+    const body = queue.map((t) => `${t.id} ${t.data.title}${!epic && t.data.epic ? ` (${t.data.epic})` : ''}${t.data.next ? ' ← next' : ''}`).join('\n') || '(nothing ready)';
     return head ? `${head}\n${body}` : body;
   },
 
@@ -186,12 +263,38 @@ const commands = {
     }).join('\n');
   },
 
-  prefix(cwd, [key]) {
+  prefix(cwd, args) {
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { start: { type: 'string' } } });
     const pm = requireBoard(cwd);
-    if (key === undefined) return taskPrefix(pm);
-    setTaskPrefix(pm, key);
-    persist(pm, `pm: prefix ${key}`);
+    const key = positionals[0] ?? taskPrefix(pm); // --start alone applies to the current prefix
+    if (positionals[0] === undefined && values.start === undefined) return key;
+    setTaskPrefix(pm, key, values.start === undefined ? undefined : Number(values.start));
+    persist(pm, `pm: prefix ${key}${values.start ? ` --start ${values.start}` : ''}`);
     return `task prefix: ${key} — new tasks start at ${idOf(key, nextNumber(pm))}`;
+  },
+
+  next(cwd, args) {
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { clear: { type: 'boolean' } } });
+    const [id] = positionals;
+    if (Boolean(id) === Boolean(values.clear)) fail('usage: pm next <id> | pm next --clear');
+    const pm = requireBoard(cwd);
+    if (values.clear) {
+      clearNext(pm);
+      persist(pm, 'pm: next --clear');
+      return 'next cleared';
+    }
+    const t = setNext(pm, id, today());
+    persist(pm, `pm: next ${id}`);
+    return `${id} ← next (${t.data.epic || 'repo-wide'}): the next session starts with it`;
+  },
+
+  audit(cwd, args) {
+    const fix = parseArgs({ args, options: { fix: { type: 'boolean' } } }).values.fix;
+    const pm = requireBoard(cwd);
+    const { findings, fixed } = runAudit({ pm, cwd, fix });
+    if (fixed.length) writeBoard(pm);
+    const lines = [...findings.map(findingLine), ...fixed.map((f) => `fixed: ${f}`)];
+    return lines.join('\n') || 'audit: clean';
   },
 
   validate(cwd) {
