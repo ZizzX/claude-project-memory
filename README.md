@@ -5,7 +5,7 @@
 <h1 align="center">project-memory</h1>
 
 <p align="center">
-  A plan, a task board, a decision log and a session handoff for every git repository —<br>
+  A plan, a task board, a decision log, learnings and a session handoff for every git repository —<br>
   kept by Claude Code itself, shared by all your worktrees, local by default.
 </p>
 
@@ -69,7 +69,9 @@ turn that off with `git config --global pm.updateCheckNetwork false`; the local 
    "create a board".
 2. Ask **"break it down"**. Claude creates tasks with order and dependencies, and links a detailed plan.
 3. Ask **"what's next?"**. Claude claims the first ready task and writes down how it understands it.
-4. Work as usual. When you stop, say **"we're done"**: Claude logs what was done and the exact next step.
+4. Work as usual. When you stop, say **/close**: Claude closes or logs every task with the exact next step,
+   records what the session taught, and picks the task the next session starts with.
+   ("we're done" on its own only logs the next steps.)
 5. `/clear` or come back tomorrow in any worktree. The session opens with the summary and carries on.
 
 Open `board.html` (the link is in the summary) for a kanban view that refreshes every 10 seconds and keeps the cards you opened and the scroll position.
@@ -113,7 +115,11 @@ If PowerShell refuses to load the profile, allow it once with `Set-ExecutionPoli
 | "remember …" | Puts it in exactly one place: a decision, auto-memory, or the task's `## Understanding` |
 | "waiting for …" | `status=waiting` with the reason; the task leaves Ready |
 | "we're done", "continue in a new session" | Logs `did` / `next` on every active task of this worktree, updates focus |
-| `/done`, "done, only merge left" | Checks the conversation against the definition of done, then `pm done`: the task is `done`, or awaits its merge and closes by itself once it lands — see [Ending a session](#ending-a-session) |
+| `/close`, "слил", "wrap up" | Closes the session: every task of this worktree closed or logged with a `next:`, the retro, the task the next session starts with — see [Closing a session](#closing-a-session) |
+| "what did we learn", "что узнали нового" | The retro: records a lesson (`pm learn add`) or says there is none (`pm learn none`) — see [Learnings](#learnings) |
+| "next session starts with T-007" | `pm next`: the summary leads with that task until it is claimed |
+| "audit the board", "аудит доски" | `pm audit`: stale tasks, dead worktrees, unused learnings; `--fix` for the mechanical part — see [Audit](#audit) |
+| `/done`, "done, only merge left" | Checks the conversation against the definition of done, then `pm done`: the task is `done`, or awaits its merge and closes by itself once it lands — see [Closing a session](#closing-a-session) |
 | "the plan changes" | Edits `PLAN.md`, adds a Changelog line, records a decision |
 | "undo that", "undo the board change" | Reverts that change of the board itself with git |
 | "undo the code of T-007", "remove the changes of T-007" | Shows the `undo:` block of `pm show T-007` with its risks, waits for your yes, then reverts the task's commits in a new undo task on a `revert/T-007` branch |
@@ -131,7 +137,8 @@ After you open an MR/PR for a task, say so or run `pm set T-NNN pr=<url>`: `pm s
 merge SHA and author, and the undo block targets the merge commit instead of the individual commits.
 
 Russian phrases work too: «что дальше», «бери следующую», «разбей», «запомни», «закончили», «готово, закрываем»,
-«продолжим в новой сессии», «план меняется», «ждём», «отмени правку доски», «откати код T-007»,
+«продолжим в новой сессии», «слил», «закрой сессию», «что узнали нового», «в следующей сессии берём T-007»,
+«аудит доски», «план меняется», «ждём», «отмени правку доски», «откати код T-007»,
 «вернись к состоянию до T-007», «включи синхронизацию доски», «подключи доску», «добавь алиас pm», «обнови плагин»,
 «позже», «не напоминай», «обновляй сам».
 
@@ -145,12 +152,13 @@ Every turn that changed the board ends with one line in your language, such as
 Your worktree (feature-csv):
   T-003 CSV import [in_progress] → next: handle empty rows (2026-09-12, feature-csv)
 Elsewhere: T-008 Export to XLSX @ feature-export
-Ready: T-004 validation · T-006 export · +2 in other epics (pm ready --all)
+Ready: T-004 validation ← next · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
 Awaiting merge: T-002 (#14)
 Merged, still open: T-001 (#12) — ask the user, then pm reconcile --yes <the ids they confirm>
 Epics: APP-12 4/6 · APP-15 2/2
 Decisions: D-004 Store board outside branches · D-003 Own format
+Learnings: L-007 CI translation keys fail while local passes
 CLI: node "…/scripts/pm.mjs" <command>
 Rules: …
 ```
@@ -160,7 +168,7 @@ Rules: …
 | header | project, this worktree's epic, its focus line from `PLAN.md`, link to the board |
 | Your worktree | open tasks claimed here, with the last logged next step |
 | Elsewhere | tasks in progress in other worktrees — do not take them |
-| Ready | `todo` tasks whose dependencies are all done, for this worktree's epic |
+| Ready | `todo` tasks whose dependencies are all done, for this worktree's epic. The task chosen by `/close` comes first, marked `← next` (`← next (after PM-009)` while its dependencies are open) |
 | Waiting | tasks blocked on something outside the board, and what |
 | Closed after merge | `review` tasks closed at this session start because their merge was seen |
 | Awaiting merge | `review` tasks: finished, only the merge is left |
@@ -168,6 +176,9 @@ Rules: …
 | PR conflict | the task's `pr` comes from another branch than the task's; `pm reconcile` prints the fix |
 | Epics | open / total per direction |
 | Decisions | the three most recent |
+| Learnings | up to 5 active learnings of this worktree's tasks (else the most recently seen), id and title only |
+| Promote | learnings ready to become a rule, e.g. `L-003 (seen 4 in 3 tasks)`; only when there are any |
+| `[pm] audit: N findings` | once a week, when the audit found something: run `pm audit` |
 
 The summary never exceeds 40 lines. Detail stays in the files and is read only when needed.
 
@@ -221,7 +232,28 @@ Typical shapes:
 
 If a small fix spills into a second session, file the task then. It is cheaper than filing ahead.
 
-## Ending a session
+## Closing a session
+
+Say `/close` (or «слил», "wrap up"). It leaves the board in a state the next session can start from without
+this conversation. Four steps, one exchange each, every step ends with a CLI call:
+
+1. **Tasks of this worktree.** For each open task claimed here Claude asks: done, awaiting merge, or paused?
+   Done or awaiting merge runs the `/done` procedure below. Paused is logged with a concrete next step:
+   `pm log T-003 --did "…" --next "<exact next step>"`. Without a concrete `next:` the task is not logged.
+   If no task is claimed but code changed, Claude offers to file one, or accepts "nothing to track".
+2. **Retro.** The `retro` skill looks for lessons of this session (see [Learnings](#learnings)). It ends with
+   `pm learn add …` for each lesson, or `pm learn none <id>` for every task that taught nothing. Then
+   `pm learn check <ids>` over the tasks from step 1 must print `ok` before `/close` goes on.
+   `/close --no-retro` skips the skill and runs `pm learn none` itself, so the checkpoint still exists.
+3. **Next task.** `pm ready`, then you say which task the next session starts with (default: the first ready
+   one, or "none"). `pm next <id>` marks it. If this epic's `## Current focus` moved, `PLAN.md` is updated.
+4. **Wrap.** Four lines: the board diff line; `next session: <id> <title>`; whether the worktree can be
+   removed (clean and pushed) or what is not committed or pushed; and that `/clear` is safe.
+
+`/close` never removes a worktree, never pushes code, and never runs a git command that changes the
+repository. Removing the worktree is yours.
+
+### Closing one task: `/done`
 
 When the work is finished, say `/done` (or "done, only merge left"). Claude checks the conversation first:
 the checklist is closed and the verification really ran. Then it runs `pm done`, which prints what happened:
@@ -270,6 +302,112 @@ assumed and `pm reconcile` prints the fix once: `git remote set-head origin -a`.
 `board.html` (the task files stay). To roll back, first `pm set T-NNN status=in_progress` for each
 `review` task. After the update, run `pm reconcile` once to find tasks merged earlier but never closed.
 
+## Learnings
+
+`decisions.md` records choices. A learning records a lesson: "this error means X, do Y". It has three
+parts: the symptom as the next agent will see it, the fix, and how to apply it. Learnings belong to the
+project: same board repository, same sync.
+
+Each one is a file, `learnings/L-NNN.md`:
+
+```markdown
+---
+id: L-003
+title: CI translation keys fail while local passes
+pattern: i18n.missing-key-in-ci
+status: active            # active | promoted | retired
+seen: 2
+first: 2026-10-01
+last: 2026-10-22
+tasks: [PM-012, PM-019]
+promoted_to: ""           # "<file>#<section>" once promoted
+retired_why: ""
+---
+## Symptom
+Unable to find … <key> in the DOM only in CI.
+
+## Fix
+The CI build runs with a stale locale bundle; rebuild locales before the e2e job.
+
+## Apply
+When a test fails on a translation key that exists locally: run `pnpm locales:build` first, do not
+touch the component.
+```
+
+`pm learn` writes the frontmatter; the three sections are filled from flags and may be edited afterwards.
+
+| Command | What it does |
+|---|---|
+| `pm learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]` | Record a lesson. `pattern` is `area.symptom`, lowercase |
+| `pm learn list [--all]` | Active learnings; `--all` adds promoted and retired |
+| `pm learn show L-003` | The file |
+| `pm learn find <words…>` | Search title, pattern and body of active learnings |
+| `pm learn promote L-003 --to <file#section>` | Mark it promoted (see below) |
+| `pm learn retire L-003 --why "…"` | It proved wrong or obsolete |
+| `pm learn none <task-id>` | The retro checkpoint when nothing was learned |
+| `pm learn check <task-ids>` | `ok`, or the tasks that still owe a retro line (exit 1) |
+
+**Dedupe by `pattern`.** A known pattern is counted, not duplicated:
+
+- the same pattern as an active learning bumps `seen`, sets `last` and adds the tasks; no new file;
+- the same task on the same day is a no-op, so `seen` counts recordings, not retries;
+- a retired learning with that pattern is reactivated;
+- a promoted one is left alone and the command prints where it was promoted;
+- no exact match: the file is created, with a `similar:` hint if the `area.` prefix or a title word matches.
+
+**Write nothing by default.** A learning is worth a file only when the next agent would otherwise hit the
+same wall. The retro routes each candidate, first match wins: a skill that misfired is fixed, not
+recorded; what is already in the repo, git, CLAUDE.md or a skill is not duplicated; a fact about you goes
+to auto-memory; a verified procedure of two or more steps becomes a skill; a project lesson becomes a
+learning; a code defect across the repo becomes a task. Never recorded: session state (MR numbers, test
+counts, statuses), "X does not work" without a fix, one-off narratives, machine-specific paths or tokens.
+Text is checked for secrets before it is written.
+
+**In the session summary.** The `Learnings:` line lists up to 5 active learnings (those of this worktree's
+tasks, else the most recent), from frontmatter only, so the summary does not grow with their number. The
+`Promote:` line appears only when a learning has been seen 3 or more times in 2 or more tasks.
+
+**Promotion.** A repeated learning can become a rule in the repo. Claude proposes the target (the repo's
+CLAUDE.md or AGENTS.md, or the skill of that area) and a one-paragraph rule. Only after you say yes it
+writes the rule there with a trailing `Source: L-003` line, then runs `pm learn promote L-003 --to
+<file#section>`. The change in the repo is your commit. Claude never promotes on its own.
+
+**Cap.** At most 100 active learnings per project; `pm learn add` refuses the 101st until you retire or
+promote one (`pm learn list` shows them).
+
+**Learnings and auto-memory.** Learnings are lessons of this project. Claude Code auto-memory stays
+the place for facts about you and your preferences. Nothing here changes it.
+
+## Audit
+
+`pm audit` lists what went stale. It is deterministic, needs no LLM, and only reports: the exit code is 0
+and nothing changes unless you add `--fix`. With nothing to report it prints `audit: clean`. Each finding
+is one line: `<code> <id or file> — <what> — <fix or how>`.
+
+| Code | Finding | `--fix` |
+|---|---|---|
+| `stuck` | `in_progress` whose last manual Log line (`did:`) is older than 14 days; `auto:` lines do not count; no Log line → `updated` | no — list |
+| `waiting-long` | `waiting_since` (or `updated` when absent) older than 30 days | no — list |
+| `review-no-pr` | `review` without `pr` | no — list |
+| `dead-worktree` | `worktrees:` entry that `git worktree list` of this repo does not know | yes, only while sync is off — another machine's worktrees are invisible here, so with sync on it is listed only |
+| `orphan` | `in_progress` with no `worktrees:` entry (its worktree was removed after `/close`) | no — list with "pm claim or pm set status=todo" |
+| `learning-dup` | two active learnings with the same `pattern` | no — list |
+| `next-stale` | `next:` older than 30 days or on a task that is no longer `todo`/`waiting` | yes — clear it |
+| `state-old` | `.state/session-*.json` older than 7 days | yes — delete |
+| `learning-unused` | active learning with `last` older than 90 days | no — list with `pm learn retire` hint |
+| `learning-promote` | active learning past the promotion threshold | no — list |
+| `learnings-cap` | more than 80 active learnings | no — list the count |
+| `decision-dropped` | a decision whose `- tasks:` are all `dropped` | no — list |
+| `retro-missing` | a `done`/`review` task whose last status date (last Log line, else `updated`) is on or after `retroSince` and within 30 days, with no `retro:` line | no — list |
+
+`pm audit --fix` touches only what cannot be wrong: dead worktree entries (sync off), stale `next` marks and
+session state files older than 7 days. It prints what it changed and commits `pm: audit --fix`. It never
+changes a status and never deletes a task, a learning or a decision. Everything else is a question for you,
+answered with the command the line names.
+
+At session start, once every 7 days, the summary adds `[pm] audit: N findings — run: pm audit` when the
+count is above zero. That count never fixes anything.
+
 ## Commands
 
 | Command | What it does |
@@ -285,7 +423,13 @@ assumed and `pm reconcile` prints the fix once: `git remote set-head origin -a`.
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
 | `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |
 | `pm epics` | Every epic: open/total and its focus line |
-| `pm prefix [KEY]` | Show or set the task id prefix, e.g. `PM` → `PM-051`, for branches like `feat/PM-051/slug`. Stored in the board (`config.json`), so synced machines share it. Existing tasks keep their ids; the number continues |
+| `pm prefix [KEY] [--start N]` | Show or set the task id prefix, e.g. `PM` → `PM-051`, for branches like `feat/PM-051/slug`. `--start N`: new ids continue from N. Stored in the board (`config.json`), so synced machines share it. Existing tasks keep their ids; the number continues |
+| `pm next [<id> \| --clear]` | The task the next session starts with (one per epic; only a `todo` task); `pm claim` clears it |
+| `pm learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]` | Record a lesson; a known pattern is counted, not duplicated |
+| `pm learn list [--all] \| show <id> \| find <words…>` | List active learnings, show one, or search them |
+| `pm learn promote <id> --to <file#section> \| retire <id> --why "..."` | Mark a learning as promoted to a rule, or retire it |
+| `pm learn none <task-id> \| check <task-ids>` | The retro checkpoint: nothing learned / which tasks still owe one |
+| `pm audit [--fix]` | What went stale (stuck, waiting, orphans, unused learnings…); `--fix`: the mechanical part |
 | `pm validate` | Check ids, statuses, `waiting` without a reason, unknown or dropped dependencies, cycles |
 | `pm board` | Redraw `BOARD.md` and `board.html`, print the path |
 | `pm summary` | Print the session summary for this worktree |
@@ -302,7 +446,7 @@ Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `review` (await
 
 | Event | What happens |
 |---|---|
-| **SessionStart** (startup, resume, clear, compact) | With sync on: commit, pull, check the memory link. Close `review` tasks whose merge is already known (local refs and the merge cache, no network); start a background merge check when the cache is older than 30 minutes. Redraw the board, validate it, print the summary |
+| **SessionStart** (startup, resume, clear, compact) | With sync on: commit, pull, check the memory link. Close `review` tasks whose merge is already known (local refs and the merge cache, no network); start a background merge check when the cache is older than 30 minutes. Redraw the board, validate it, print the summary. Once every 7 days it also counts audit findings and prints `[pm] audit: N findings` when there are any; it never fixes anything |
 | **PostToolUse** (Write, Edit, MultiEdit, ExitPlanMode) | A file inside the board changed → redraw the views. A plan file was written → ask Claude to reconcile the board with it |
 | **Stop** | Commit the board. If code changed but neither this worktree's tasks nor `PLAN.md` / `decisions.md` were touched for 20 minutes → ask Claude to log progress (at most once per 20 minutes) |
 | **PreCompact**, **SessionEnd** | Append an automatic note (changed files, last commit) to this worktree's in-progress tasks and commit |
@@ -319,6 +463,8 @@ Hooks never break a session: any error is swallowed, and the hook exits cleanly.
 ├── PLAN.md          goal, milestones, current focus (one line per epic), changelog
 ├── tasks/T-NNN.md   frontmatter + Goal, Understanding, Checklist, Log
 ├── decisions.md     append-only D-NNN entries: what, why, what was rejected
+├── learnings/L-NNN.md   one lesson each: symptom, fix, how to apply
+├── config.json      task id prefix, startNumber, retroSince
 ├── memory/          Claude Code auto-memory, only when sync is on
 ├── BOARD.md         generated view, never edit
 └── board.html       generated kanban, refreshes itself
@@ -329,7 +475,7 @@ Hooks never break a session: any error is swallowed, and the hook exits cleanly.
 - **It is a git repository** (branch `pm`). Every change is a commit, so any change can be reverted:
   `git -C <pm dir> log --oneline`, then `git -C <pm dir> revert <sha>`.
 - **Layers of memory, each in one place:** auto-memory holds durable facts about the project;
-  `decisions.md` holds why things are the way they are; a task file holds what and how for that work;
+  `decisions.md` holds why things are the way they are; `learnings/` holds lessons about this project; a task file holds what and how for that work;
   `PLAN.md` holds where things stand. A direction's detailed plan is its own file, linked with `--links`.
 
 A task file:
@@ -354,6 +500,12 @@ epic: APP-12
 ## Log
 - 2026-09-12 · feature-csv · did: tokenizer and header mapping · next: handle empty rows
 ```
+
+Two more frontmatter fields appear when needed. `next: <date>` marks the `todo` task the next session
+starts with (set by `pm next`, removed by `pm claim` or any move away from `todo`). `waiting_since: <date>`
+is set when a task enters `waiting` and removed when it leaves. `config.json` holds the id prefix,
+`startNumber` (from `pm prefix --start`) and `retroSince`, the date of the first retro on this board:
+the audit asks for `retro:` Log lines only on tasks closed on or after it.
 
 ## Sync across machines (opt-in)
 

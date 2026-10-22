@@ -71,7 +71,7 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "update it yourself, do not ask"             pm.updateNotify=auto — Claude installs new versions and reports them
 After creating an MR/PR for a task: pm set T-NNN pr=<url> — pm show then reads its state and merge SHA.
 Protocol Claude follows: /pm · docs: https://github.com/ZizzX/claude-project-memory#readme
-Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/claude-project-memory#ending-a-session`;
+Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/claude-project-memory#closing-a-session`;
 
 class UsageError extends Error {}
 const fail = (msg) => {
