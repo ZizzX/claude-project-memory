@@ -177,7 +177,7 @@ Rules: …
 | Epics | open / total per direction |
 | Decisions | the three most recent |
 | Learnings | up to 5 active learnings of this worktree's tasks (else the most recently seen), id and title only |
-| Promote | learnings ready to become a rule, e.g. `L-003 (seen 4 in 3 tasks)`; only when there are any |
+| Promote | learnings ready to become a rule, e.g. `L-003 CI keys fail in CI (seen 4 in 3 tasks)`, then the hint to propose the rule; only when there are any |
 | `[pm] audit: N findings` | once a week, when the audit found something: run `pm audit` |
 
 The summary never exceeds 40 lines. Detail stays in the files and is read only when needed.
@@ -392,7 +392,7 @@ is one line: `<code> <id or file> — <what> — <fix or how>`.
 | `dead-worktree` | `worktrees:` entry that `git worktree list` of this repo does not know | yes, only while sync is off — another machine's worktrees are invisible here, so with sync on it is listed only |
 | `orphan` | `in_progress` with no `worktrees:` entry (its worktree was removed after `/close`) | no — list with "pm claim or pm set status=todo" |
 | `learning-dup` | two active learnings with the same `pattern` | no — list |
-| `next-stale` | `next:` older than 30 days or on a task that is no longer `todo`/`waiting` | yes — clear it |
+| `next-stale` | `next:` older than 30 days or on a task that is no longer `todo` | yes — clear it |
 | `state-old` | `.state/session-*.json` older than 7 days | yes — delete |
 | `learning-unused` | active learning with `last` older than 90 days | no — list with `pm learn retire` hint |
 | `learning-promote` | active learning past the promotion threshold | no — list |

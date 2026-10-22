@@ -160,3 +160,29 @@ test('retroSince is written once', () => {
   add(root);
   assert.equal(config(root).retroSince, '2026-01-01');
 });
+
+test('a learning with partial frontmatter does not break summary, add or audit', () => {
+  const root = board(1);
+  const dir = path.join(pmDir(root), 'learnings');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'L-001.md'), '---\nid: L-001\ntitle: hand-written\nstatus: active\n---\n## Symptom\nx\n');
+  fs.writeFileSync(path.join(dir, 'L-002.md'), '---\nid: L-002\ntitle: also by hand\npattern: a.c\nstatus: active\n---\n');
+  const s = cli(['summary'], root);
+  assert.match(s.out, /\nRules:/, s.err);
+  assert.match(cli(['learn', 'add', '--title', 'y', '--pattern', 'a.b'], root).out, /^L-003 recorded/);
+  const a = cli(['audit'], root);
+  assert.equal(a.code, 0);
+  assert.doesNotMatch(a.out, /undefined/);
+});
+
+test('unknown task in --tasks writes nothing', () => {
+  const root = board(1);
+  const r = cli(['learn', 'add', '--title', 'x', '--pattern', 'a.b', '--tasks', 'T-009'], root);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /unknown task T-009/);
+  assert.ok(!fs.existsSync(path.join(pmDir(root), 'learnings', 'L-001.md')));
+  add(root, ['--tasks', 'T-001']);
+  const bad = add(root, ['--tasks', 'T-009']);
+  assert.equal(bad.code, 1);
+  assert.equal(parse(learning(root, 'L-001')).data.seen, '1');
+});

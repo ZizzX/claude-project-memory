@@ -44,7 +44,7 @@ export function runAudit({ pm, cwd, now = Date.now(), fix = false }) {
     if (live && t.data.worktrees.length) {
       const dead = t.data.worktrees.filter((w) => !live.has(w));
       if (dead.length) {
-        add('dead-worktree', t.id, `worktree ${dead.join(', ')} is not on this machine`, synced ? 'synced board: may live elsewhere — pm set worktrees=…' : 'pm audit --fix', !synced, () => {
+        add('dead-worktree', t.id, `worktree ${dead.join(', ')} is not on this machine`, synced ? 'synced board: check there before pm set worktrees=…' : 'pm audit --fix', !synced, () => {
           t.data.worktrees = t.data.worktrees.filter((w) => live.has(w));
           writeTask(t);
           return `${t.id} worktrees -= ${dead.join(', ')}`;
@@ -109,6 +109,7 @@ export function auditLine(pm, cwd, now = Date.now()) {
   const { at = 0 } = readState(pm, 'audit');
   if (now - at < AUDIT_DAYS * DAY) return '';
   writeState(pm, 'audit', { at: now });
-  const n = runAudit({ pm, cwd, now }).findings.length;
+  // A synced board cannot tell another machine's worktree from a dead one: that line is not worth a weekly nag.
+  const n = runAudit({ pm, cwd, now }).findings.filter((f) => f.code !== 'dead-worktree' || f.fixable).length;
   return n ? `[pm] audit: ${n} finding${n === 1 ? '' : 's'} — run: pm audit` : '';
 }

@@ -16,11 +16,14 @@ CLI call. Never skip a step silently — say what you skipped and why.
      logged — ask until it is.
    - No task here but code changed → offer `pm task new` + `pm claim` + `pm log`, or accept "nothing to track".
 2. **Retro.** Invoke the `retro` skill of this plugin. It ends with `pm learn add … --tasks <ids>` for each
-   lesson, or `pm learn none <id>` for every task that taught nothing. Then run `pm learn check <ids>` over the
-   ids from step 1: continue only when it prints `ok`. `$ARGUMENTS` containing `--no-retro` → skip the skill
+   lesson, and `pm learn none <id>` for every id from step 1 that no `learn add` named (a lesson that went to a
+   skill, auto-memory or a task still leaves the task without a `retro:` line). Then run `pm learn check <ids>`
+   over the ids from step 1: continue only when it prints `ok`. `$ARGUMENTS` containing `--no-retro` → skip the skill
    and run `pm learn none <id>` for each id yourself, so the checkpoint still exists.
 3. **Next task.** `pm ready` → ask which task the next session starts with (default: the first ready one;
-   "none" when the direction is finished) → `pm next <id>`. If `## Current focus` of this epic moved, update
+   "none" when the direction is finished) → `pm next <id>`. A paused task of step 1 stays `in_progress` and
+   cannot be `next`: the summary already leads with it and its `next:` line, so answer "continue <id>" and run
+   nothing. If `## Current focus` of this epic moved, update
    its line in `PLAN.md` and append a Changelog line.
 4. **Wrap.** Print four lines, nothing else:
    - the board diff line (`board: PM-012 → review (MR !41) · PM-013 paused · L-004 · next PM-014`);

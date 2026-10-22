@@ -114,3 +114,23 @@ test('a broken learning file does not break the summary', () => {
   assert.match(s, /\nRules:/);
   assert.doesNotMatch(s, /Learnings:/);
 });
+
+test('a fresh worktree on a board with epics sees every next task first', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'a1', epic: 'A', date: D });
+  newTask(pm, { title: 'a2', epic: 'A', date: D });
+  newTask(pm, { title: 'b1', epic: 'B', date: D });
+  setNext(pm, 'T-002', D);
+  assert.match(buildSummary({ pm, worktree: 'fresh', scriptPath: 'x' }), /Ready: T-002 a2 \(A\) ← next · T-001 a1 \(A\) · T-003 b1 \(B\)/);
+});
+
+test('a next mark left on a non-todo task by an older client is ignored', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'a', date: D });
+  setNext(pm, 'T-001', D);
+  const file = `${pm}/tasks/T-001.md`;
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('status: todo', 'status: in_progress'));
+  assert.doesNotMatch(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /← next/);
+});

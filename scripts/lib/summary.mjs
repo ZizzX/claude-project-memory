@@ -37,8 +37,9 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   // Own epic: its queue. No epic on a board that has some: the top task of each, so a fresh worktree sees the directions.
   const perEpic = (list) => (epic ? byEpic(list, epic) : epics.length ? firstPerEpic(list) : list);
   const queue = readyQueue(tasks);
-  const nx = epic || !epics.length ? nextTask(tasks, epic) : null;
-  const ready = [nx, ...perEpic(queue).filter((t) => t !== nx)].filter(Boolean).slice(0, 3);
+  // Own epic: its next task. No epic yet: every epic's next task — /close chose them for the session after it.
+  const nexts = epic || !epics.length ? [nextTask(tasks, epic)].filter(Boolean) : tasks.filter((t) => t.data.next && t.data.status === 'todo');
+  const ready = [...nexts, ...perEpic(queue).filter((t) => !nexts.includes(t))].slice(0, 3);
   const others = epic ? queue.length - perEpic(queue).length : 0;
   // Waiting tasks of my epic, plus the ones my tasks depend on directly: a cross-epic blocker is still my blocker.
   const scope = byEpic(tasks, epic);

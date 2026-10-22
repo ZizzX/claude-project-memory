@@ -20,7 +20,19 @@ const toArray = (v) => (Array.isArray(v) ? v : v ? String(v).split(',').map((s) 
 function readFile(file) {
   const { data: raw, body } = parse(fs.readFileSync(file, 'utf8'));
   if (!raw.id) return null; // not a learning (no frontmatter): skipped, never fatal
-  const data = { ...raw, seen: Number(raw.seen ?? 1), tasks: toArray(raw.tasks), promoted_to: raw.promoted_to ?? '', retired_why: raw.retired_why ?? '' };
+  // A hand-written file may lack fields; defaults keep the summary and the audit alive.
+  const data = {
+    ...raw,
+    title: String(raw.title ?? ''),
+    pattern: String(raw.pattern ?? ''),
+    status: STATUSES.includes(raw.status) ? raw.status : 'active',
+    seen: Number(raw.seen) || 1,
+    first: String(raw.first ?? raw.last ?? ''),
+    last: String(raw.last ?? raw.first ?? ''),
+    tasks: toArray(raw.tasks),
+    promoted_to: raw.promoted_to ?? '',
+    retired_why: raw.retired_why ?? '',
+  };
   return { file, id: path.basename(file, '.md'), data, body };
 }
 
@@ -75,18 +87,15 @@ export function similar(all, { pattern, title }, exclude) {
   ));
 }
 
-function retroLine(pm, tasks, id, worktree, date) {
-  for (const t of tasks) {
-    readTask(pm, t); // unknown ids fail before anything is written
-  }
-  for (const t of tasks) appendRetro(pm, t, id, worktree, date);
-}
+const retroLine = (pm, tasks, id, worktree, date) => tasks.forEach((t) => appendRetro(pm, t, id, worktree, date));
 
 export function addLearning(pm, { title, pattern, symptom, fix, apply, tasks = [], worktree, date }) {
   if (!title) throw new Error('--title is required');
   checkPattern(pattern);
+  for (const t of tasks) readTask(pm, t); // an unknown id fails before anything is written
   const all = listLearnings(pm);
-  const same = all.find((l) => l.data.pattern === pattern && l.data.status !== 'promoted');
+  const same = all.find((l) => l.data.pattern === pattern && l.data.status === 'active')
+    ?? all.find((l) => l.data.pattern === pattern && l.data.status === 'retired');
   const promoted = !same && all.find((l) => l.data.pattern === pattern);
   if (promoted) return { id: promoted.id, created: false, note: `${promoted.id} is promoted to ${promoted.data.promoted_to} — nothing written` };
   setRetroSince(pm, date);
@@ -125,7 +134,7 @@ export function addLearning(pm, { title, pattern, symptom, fix, apply, tasks = [
     fs.writeSync(fd, serialize(data, template({ symptom, fix, apply })));
     fs.closeSync(fd);
     retroLine(pm, tasks, id, worktree, date);
-    return { id, created: true, seen: 1, tasks, similar: similar(all, { pattern, title }, id).map((l) => `${l.id} ${l.data.pattern}`), note: `${id} recorded: ${file}` };
+    return { id, created: true, seen: 1, tasks, similar: similar(all, { pattern, title }, id).slice(0, 3).map((l) => `${l.id} ${l.data.pattern}`), note: `${id} recorded: ${file}` };
   }
 }
 

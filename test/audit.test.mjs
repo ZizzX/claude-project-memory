@@ -179,3 +179,12 @@ test('session start counts the audit once a week', () => {
   fs.rmSync(path.join(pm, '.state', 'audit.json'));
   assert.match(onSessionStart({ session_id: 's' }, root), /\[pm\] audit: 1 finding — run: pm audit/);
 });
+
+test('the weekly line ignores dead worktrees it cannot fix on a synced board', () => {
+  const { root, pm } = board();
+  newTask(pm, { title: 'a', date: ago(1) });
+  setFields(pm, 'T-001', { status: 'in_progress', worktrees: ['other-machine'] }, ago(1));
+  sh(['remote', 'add', 'origin', tmp('pm-remote-')], pm);
+  assert.equal(auditLine(pm, root, NOW), '');
+  assert.match(cli(['audit'], root).out, /^dead-worktree T-001 — worktree other-machine is not on this machine — synced board: check there before pm set worktrees=…$/m);
+});

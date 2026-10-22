@@ -136,6 +136,7 @@ export function newTask(pm, { title, order, deps = [], milestone = '', epic = ''
 
 export function setFields(pm, id, fields, date) {
   const task = readTask(pm, id);
+  const wasWaiting = task.data.status === 'waiting';
   for (const [k, v] of Object.entries(fields)) {
     if (k === 'id') throw new Error('id cannot be changed');
     if (k === 'status' && !STATUSES.includes(v)) throw new Error(`bad status "${v}"; use ${STATUSES.join(' | ')}`);
@@ -151,8 +152,8 @@ export function setFields(pm, id, fields, date) {
   if ('status' in fields && fields.status !== 'review' && !('review_at' in fields)) delete task.data.review_at;
   // next is a promise for a todo task; any other status has already answered it.
   if (task.data.status !== 'todo') delete task.data.next;
-  if (task.data.status === 'waiting') task.data.waiting_since ??= date;
-  else delete task.data.waiting_since;
+  if (task.data.status !== 'waiting') delete task.data.waiting_since;
+  else if (!wasWaiting) task.data.waiting_since = date; // a 0.10 file already waiting keeps no date: the audit falls back to updated
   // Set by hand, review still needs its start: a merge before it is an earlier PR, a merge after it closes the task.
   if (task.data.status === 'review' && !task.data.review_at) task.data.review_at = new Date().toISOString();
   if (task.data.status === 'waiting' && !task.data.waiting_on) {
@@ -188,7 +189,7 @@ export function clearNext(pm, id) {
   }
 }
 
-export const nextTask = (tasks, epic = '') => tasks.find((t) => t.data.next && t.data.epic === epic);
+export const nextTask = (tasks, epic = '') => tasks.find((t) => t.data.next && t.data.status === 'todo' && t.data.epic === epic);
 
 export function claim(pm, id, worktree, date, branch = '') {
   const task = readTask(pm, id);

@@ -68,3 +68,12 @@ test('old files gain no fields', () => {
   const text = read(root, 'T-001');
   assert.doesNotMatch(text, /^(next|waiting_since): /m);
 });
+
+test('an old waiting file gains no waiting_since on an unrelated edit', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  const file = path.join(pmDir(root), 'tasks', 'T-001.md');
+  fs.writeFileSync(file, '---\nid: T-001\ntitle: old\nstatus: waiting\norder: 1\ndepends_on: []\nwaiting_on: api\nworktrees: []\nmilestone: ""\nlinks: []\nupdated: 2026-09-01\nepic: ""\n---\n## Goal\n\n## Log\n');
+  cli(['set', 'T-001', 'order=2'], root);
+  assert.doesNotMatch(read(root, 'T-001'), /^waiting_since: /m);
+});
