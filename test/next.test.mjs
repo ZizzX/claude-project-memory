@@ -244,3 +244,20 @@ test('pm next --epic takes a task of that epic before a repo-wide one, as --opti
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /^T-002 claimed/);
 });
+
+test("pm next and pm ready put the epic's next marker before the repo-wide one, as the summary does", () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'b0', '--epic', 'B', '--order', '1'], root);
+  cli(['task', 'new', '--title', 'shared', '--epic', '', '--order', '2'], root);
+  cli(['task', 'new', '--title', 'b1', '--epic', 'B', '--order', '3'], root);
+  cli(['claim', 'T-001'], root);
+  cli(['set', 'T-001', 'status=done'], root);
+  cli(['next', 'T-002'], root);
+  cli(['next', 'T-003'], root);
+
+  assert.match(cli(['ready'], root).out.split('\n')[1], /^T-003 /);
+  const r = cli(['next'], root);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^T-003 claimed/);
+});

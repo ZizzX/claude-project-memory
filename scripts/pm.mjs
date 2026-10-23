@@ -97,6 +97,9 @@ function claimHere(pm, cwd, id) {
   return wt;
 }
 
+// The order of the summary's Ready line: this epic's next marker, then the repo-wide one, then the order.
+const nextRank = (t, epic) => (!t.data.next ? 2 : t.data.epic === epic ? 0 : 1);
+
 // What `pm ready` lists for this worktree, the task marked next first.
 // Without an epic of its own the worktree gets only repo-wide tasks: another direction's task is never taken silently.
 function nextQueue(all, cwd, epicArg) {
@@ -106,7 +109,7 @@ function nextQueue(all, cwd, epicArg) {
   // An epic named on purpose starts that direction: its own tasks go before the repo-wide ones.
   const own = (t) => epicArg !== undefined && t.data.epic === epic;
   const queue = (epic ? byEpic(ready, epic) : ready.filter((t) => !t.data.epic))
-    .sort((a, b) => own(b) - own(a) || Boolean(b.data.next) - Boolean(a.data.next));
+    .sort((a, b) => own(b) - own(a) || nextRank(a, epic) - nextRank(b, epic));
   return { epic, ready, queue };
 }
 
@@ -305,7 +308,7 @@ const commands = {
     const head = epic
       ? `# epic ${epic} · pm ready --all for every direction`
       : hasEpics && !v.all ? '# no epic for this worktree yet — start yours with: pm task new --epic KEY' : '';
-    const queue = byEpic(readyQueue(all), epic).sort((a, b) => Boolean(b.data.next) - Boolean(a.data.next));
+    const queue = byEpic(readyQueue(all), epic).sort((a, b) => nextRank(a, epic) - nextRank(b, epic));
     const body = queue.map((t) => `${t.id} ${t.data.title}${!epic && t.data.epic ? ` (${t.data.epic})` : ''}${t.data.next ? ' ← next' : ''}`).join('\n') || '(nothing ready)';
     return head ? `${head}\n${body}` : body;
   },
