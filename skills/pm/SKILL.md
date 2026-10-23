@@ -36,7 +36,8 @@ into the board's Archive by itself; there is nothing to close.
 
 | Situation | Do this |
 |---|---|
-| "what's next?", "take the next one", or a session starts with no active task | `pm ready` — its first line says which epic it is narrowed to. If it says there is no epic for this worktree yet, or the tags show another direction's tasks, do not take one of those: start this direction with `pm task new --epic <KEY>` or ask which epic the worktree is for. Otherwise take the first (or the named) task; `pm claim T-NNN`; write `## Understanding` first (how you read the task, open questions). A blocking question → `pm set T-NNN status=waiting waiting_on="…"` and ask it. |
+| "what's next?", "что дальше?", or a session starts with no active task and the user did not say what to do | `pm next --options` — one line per choice: `current` (in progress here), `task` (this worktree's queue, the first one is what `pm next` would take), `epic` (another direction with something ready). Ask with AskUserQuestion, one question, header `Next`, up to 4 options in that order: label = the id and a short title (`Continue PM-067`, `PM-070 export`, `Epic APP-12`), description = the rest of its line (the goal, the logged next step or the epic's focus); mark the first `task` "(Recommended)". "Other" is the user's own work: file it with `pm task new` and claim it. Then: a task → `pm claim T-NNN`; an epic → `pm next --epic KEY`; `current` → continue it. Without AskUserQuestion: the same as a numbered list. `(nothing ready)` → ask what to work on. |
+| "take the next one", "бери следующую" | `pm next` — claims the head of this worktree's ready queue (the task marked next first) and prints it. A named task → `pm claim T-NNN`. If it says there is no epic for this worktree, do not take another direction's task: start this direction with `pm task new --epic <KEY>` or ask which epic the worktree is for (then `pm next --epic <KEY>`). If it says a task is in progress here, finish or log that one first. After claiming, write `## Understanding` first (how you read the task, open questions). A blocking question → `pm set T-NNN status=waiting waiting_on="…"` and ask it. |
 | "break it down", a large request | Create board tasks with `pm task new --title … --epic <KEY> --order N --deps …` (one direction = one epic; the epic is inherited from this worktree's tasks when omitted, `--epic ""` makes a repo-wide task on purpose); put detail in a superpowers plan (if installed) and link it with `--links`. |
 | Small work in a repo that has a board (a one-session fix, a review, a question) | Leave the board alone; when the Stop nudge appears, reply that there is nothing to track. File a task afterwards if the work spills into a second session or blocks someone. |
 | During work | Refinements → `## Understanding`. A real decision → `pm decision --title … --why … --rejected …`. |
@@ -89,7 +90,9 @@ pm set T-003 key=value ...                      status, order, depends_on, waiti
 pm claim T-003                                  attach this worktree, status in_progress (a review task keeps review)
 pm log T-003 --did "..." --next "..."           append a Log entry
 pm done T-003 [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
-pm next T-003 | pm next --clear                 the task the next session starts with (one per epic; claim clears it)
+pm next [--epic KEY]                            claim the head of the ready queue (the task marked next first)
+pm next --options [--epic KEY]                  the choices for "what's next?": task in progress here, the queue, other epics
+pm next T-003 | pm next --clear                 mark the task the next session starts with (one per epic; claim clears it)
 pm learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]
 pm learn list [--all] | show L-001 | find <words…>
 pm learn promote L-001 --to <file#section> | retire L-001 --why "…"

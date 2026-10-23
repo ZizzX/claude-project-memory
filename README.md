@@ -110,7 +110,8 @@ If PowerShell refuses to load the profile, allow it once with `Set-ExecutionPoli
 
 | You say | Claude does |
 |---|---|
-| "what's next?", "take the next one" | `pm ready`, claims the first task of this worktree's direction, writes `## Understanding` first |
+| "what's next?" | `pm next --options`, then asks what to take: the task in progress, a task of the queue, another epic, or your own work — each with a line about it |
+| "take the next one" | `pm next`: claims the first ready task of this worktree's direction, writes `## Understanding` first |
 | "break it down" | Creates tasks with `--order`, `--deps`, `--epic`; puts detail in a plan file and links it |
 | "remember …" | Puts it in exactly one place: a decision, auto-memory, or the task's `## Understanding` |
 | "waiting for …" | `status=waiting` with the reason; the task leaves Ready |
@@ -424,7 +425,9 @@ count is above zero. That count never fixes anything.
 | `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |
 | `pm epics` | Every epic: open/total and its focus line |
 | `pm prefix [KEY] [--start N]` | Show or set the task id prefix, e.g. `PM` → `PM-051`, for branches like `feat/PM-051/slug`. `--start N`: new ids continue from N. Stored in the board (`config.json`), so synced machines share it. Existing tasks keep their ids; the number continues |
-| `pm next [<id> \| --clear]` | The task the next session starts with (one per epic; only a `todo` task); `pm claim` clears it |
+| `pm next [--epic KEY]` | Take the head of the ready queue and claim it: the task marked next first, then by order. Stays in this worktree's epic; a worktree without one takes only repo-wide tasks unless `--epic` names one. Refuses while a task is in progress here |
+| `pm next --options [--epic KEY]` | The choices for "what's next?", one line each: `current` (in progress here), `task` (the queue, with its goal or last logged next step), `epic` (other epics with something ready, their first task and focus). Claims nothing |
+| `pm next <id> \| --clear` | Mark the task the next session starts with (one per epic; only a `todo` task); `pm claim` clears it |
 | `pm learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]` | Record a lesson; a known pattern is counted, not duplicated |
 | `pm learn list [--all] \| show <id> \| find <words…>` | List active learnings, show one, or search them |
 | `pm learn promote <id> --to <file#section> \| retire <id> --why "..."` | Mark a learning as promoted to a rule, or retire it |

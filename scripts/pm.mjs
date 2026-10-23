@@ -35,7 +35,9 @@ const USAGE = `usage: pm <command>
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
   epics                                        every epic with open/total and its focus line
   prefix [KEY] [--start N]                     show or set the task id prefix (PM → PM-051); --start N: new ids continue from N
-  next [<id> | --clear]                        the task the next session starts with (one per epic); claim clears it
+  next [--epic KEY]                            take the head of the ready queue (the task marked next first) and claim it
+  next --options [--epic KEY]                  what to choose from: the task in progress here, the queue, other epics — with a line each
+  next <id> | --clear                          mark the task the next session starts with (one per epic); claim clears it
   reconcile [--yes [ids]] [--no-fetch]         find merged tasks: close awaiting-merge ones, list the rest (--yes closes the listed, or all)
   learn add --title T --pattern area.symptom [--symptom S] [--fix F] [--apply A] [--tasks T-001]
                                                record a lesson; a known pattern is counted, not duplicated
@@ -51,7 +53,8 @@ const USAGE = `usage: pm <command>
   hook <event>                                 hook entry point (used by the plugin)`;
 
 const PHRASES = `In a Claude Code session you rarely run these yourself — say it and Claude runs them:
-  "what's next?" / "take the next one"         pick and claim the next ready task of this worktree's epic
+  "what's next?"                               pm next --options: choose a task, another epic, or your own work
+  "take the next one"                          pm next: claim the next ready task of this worktree's epic
   "break it down"                              turn a large request into tasks (with --epic and a linked plan)
   "remember …"                                 record a decision, a project fact or a task detail
   "waiting for …"                              mark the active task blocked, with the reason
@@ -83,6 +86,67 @@ const strings = (args, names) => parseArgs({ args, options: Object.fromEntries(n
 function requireBoard(cwd) {
   if (!hasBoard(cwd)) fail('no board here — run: pm init');
   return pmDir(cwd);
+}
+
+function claimHere(pm, cwd, id) {
+  const wt = worktreeName(cwd);
+  captureCommits(pm, cwd); // commits so far belong to the tasks already in progress here
+  claim(pm, id, wt, today(), currentBranch(cwd));
+  startCapture(pm, cwd);
+  persist(pm, `pm: claim ${id}`);
+  return wt;
+}
+
+// What `pm ready` lists for this worktree, the task marked next first.
+// Without an epic of its own the worktree gets only repo-wide tasks: another direction's task is never taken silently.
+function nextQueue(all, cwd, epicArg) {
+  const epic = epicArg?.trim() ?? activeEpic(all, worktreeName(cwd));
+  if (epic && epicArg !== undefined && !all.some((t) => t.data.epic === epic)) fail(`unknown epic "${epic}" — pm epics lists them`);
+  const ready = readyQueue(all);
+  const queue = (epic ? byEpic(ready, epic) : ready.filter((t) => !t.data.epic)).sort((a, b) => Boolean(b.data.next) - Boolean(a.data.next));
+  return { epic, ready, queue };
+}
+
+function takeNext(pm, cwd, epicArg) {
+  const all = listTasks(pm);
+  const busy = all.find((t) => t.data.status === 'in_progress' && t.data.worktrees.includes(worktreeName(cwd)));
+  if (busy) fail(`${busy.id} is in progress here — close it (pm done) or log it first; another task on purpose: pm claim <id>`);
+  const { epic, ready, queue: [t] } = nextQueue(all, cwd, epicArg);
+  if (!t) {
+    if (!epic && ready.length) fail('no epic for this worktree and no repo-wide task ready — pm next --epic KEY, or pm claim <id>');
+    fail(`nothing ready${epic ? ` in epic ${epic}` : ''}`);
+  }
+  return `${t.id} claimed by ${claimHere(pm, cwd, t.id)}: ${t.data.title}`;
+}
+
+// One line about a task: its goal, else its understanding, else the last logged next step.
+function blurb(t) {
+  const first = (name) => {
+    const m = t.body.match(new RegExp(`^## ${name}\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'));
+    return m?.[1].split('\n').map((l) => l.replace(/^[-*]\s*/, '').trim()).find(Boolean) ?? '';
+  };
+  const next = [...t.body.matchAll(/ · next: (.+)$/gm)].map((m) => m[1].trim()).filter((x) => x && x !== '—').pop() ?? '';
+  const text = first('Goal') || first('Understanding') || next;
+  return text.length > 100 ? `${text.slice(0, 99)}…` : text;
+}
+
+// The choices for "what's next?": the task in progress here, this worktree's queue, other epics with something ready.
+function nextOptions(pm, cwd, epicArg) {
+  const all = listTasks(pm);
+  const wt = worktreeName(cwd);
+  const { epic, ready, queue } = nextQueue(all, cwd, epicArg);
+  const line = (kind, t, extra = '') => [`${kind} ${t.id}`, `${t.data.title}${extra}`, blurb(t)].filter(Boolean).join(' · ');
+  const current = all.filter((t) => t.data.status === 'in_progress' && t.data.worktrees.includes(wt)).map((t) => line('current', t));
+  const tasks = queue.map((t) => line('task', t, t.data.next ? ' ← next' : ''));
+  const known = new Set(all.map((t) => t.data.epic).filter(Boolean));
+  const epics = [...new Set(ready.map((t) => t.data.epic))].filter((e) => e && e !== epic).map((e) => {
+    const ts = ready.filter((t) => t.data.epic === e).sort((a, b) => Boolean(b.data.next) - Boolean(a.data.next));
+    const focus = currentFocus(pm, e, known);
+    return `epic ${e} · ${ts.length} ready · first: ${ts[0].id} ${ts[0].data.title}${focus ? ` · focus: ${focus}` : ''}`;
+  });
+  const head = epic ? `# epic ${epic}` : known.size ? '# no epic for this worktree — a task of another epic starts that direction here' : '#';
+  const body = [...current, ...tasks, ...epics];
+  return [`${head} · pick one, or say what to work on`, ...(body.length ? body : ['(nothing ready)'])].join('\n');
 }
 
 const conflictHelp = (pm) => `sync conflict in: ${(conflictFiles(pm) ?? []).join(', ') || 'unknown files'}
@@ -138,13 +202,7 @@ const commands = {
 
   claim(cwd, [id]) {
     if (!id) fail('usage: pm claim <id>');
-    const pm = requireBoard(cwd);
-    const wt = worktreeName(cwd);
-    captureCommits(pm, cwd); // commits so far belong to the tasks already in progress here
-    claim(pm, id, wt, today(), currentBranch(cwd));
-    startCapture(pm, cwd);
-    persist(pm, `pm: claim ${id}`);
-    return `${id} claimed by ${wt}`;
+    return `${id} claimed by ${claimHere(requireBoard(cwd), cwd, id)}`;
   },
 
   log(cwd, [id, ...args]) {
@@ -274,10 +332,13 @@ const commands = {
   },
 
   next(cwd, args) {
-    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { clear: { type: 'boolean' } } });
+    const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { clear: { type: 'boolean' }, epic: { type: 'string' }, options: { type: 'boolean' } } });
     const [id] = positionals;
-    if (Boolean(id) === Boolean(values.clear)) fail('usage: pm next <id> | pm next --clear');
+    const taking = values.epic !== undefined || values.options;
+    if ((id && values.clear) || (taking && (id || values.clear))) fail('usage: pm next [--options] [--epic KEY] | pm next <id> | pm next --clear');
     const pm = requireBoard(cwd);
+    if (values.options) return nextOptions(pm, cwd, values.epic);
+    if (!id && !values.clear) return takeNext(pm, cwd, values.epic);
     if (values.clear) {
       clearNext(pm);
       persist(pm, 'pm: next --clear');

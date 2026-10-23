@@ -61,7 +61,7 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   const lines = [`[pm] ${projectName(pm)}${epic ? ` · epic ${epic}` : ''} · focus: ${currentFocus(pm, epic, keys) || '—'} · board: ${pathToFileURL(path.join(pm, 'board.html')).href}`];
   if (statusLine) lines.push(...statusLine.split('\n')); // sync/board status and the update notice are separate lines
   lines.push(`Your worktree (${worktree}):`);
-  if (!mine.length) lines.push(`  no active task — take one from Ready, or say what to work on${epics.length && !epic ? ' · a new direction: pm task new --epic <KEY>' : ''}`);
+  if (!mine.length) lines.push(`  no active task — take one from Ready (pm next), or say what to work on${epics.length && !epic ? ' · a new direction: pm task new --epic <KEY>' : ''}`);
   for (const t of mine) {
     const n = lastNext(t);
     lines.push(`  ${t.id} ${t.data.title}${tag(t, epic)} [${t.data.status}]${n ? ` → next: ${n.next} (${n.date}, ${n.who})` : ''}`);
