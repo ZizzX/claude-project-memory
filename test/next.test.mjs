@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { setup, cli } from './helpers.mjs';
+import { spawn, spawnSync } from 'node:child_process';
+import { setup, cli, addWorktree, PM } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
 
 const read = (root, id) => fs.readFileSync(path.join(pmDir(root), 'tasks', `${id}.md`), 'utf8');
@@ -262,24 +263,50 @@ test("pm next and pm ready put the epic's next marker before the repo-wide one, 
   assert.match(r.out, /^T-003 claimed/);
 });
 
-test('pm next skips a task another pm next is claiming right now, and takes over a stale reservation', () => {
+const run = (args, cwd, env = {}) => new Promise((resolve) => {
+  const c = spawn(process.execPath, [PM, ...args], { cwd, env: { ...process.env, ...env } });
+  let out = '';
+  let err = '';
+  c.stdout.on('data', (d) => (out += d));
+  c.stderr.on('data', (d) => (err += d));
+  c.on('close', (code) => resolve({ code, out: out.trim(), err: err.trim() }));
+});
+
+test('two pm next at once in one worktree claim one task; in two worktrees, two different tasks', async () => {
   const { root } = setup();
   cli(['init'], root);
   cli(['task', 'new', '--title', 'a', '--order', '1'], root);
   cli(['task', 'new', '--title', 'b', '--order', '2'], root);
-  const lock = path.join(pmDir(root), '.state', 'claim-T-001.lock');
-  fs.mkdirSync(lock, { recursive: true });
+  cli(['task', 'new', '--title', 'c', '--order', '3'], root);
 
-  const r1 = cli(['next'], root);
-  assert.equal(r1.code, 0, r1.err);
-  assert.match(r1.out, /^T-002 claimed/, 'a fresh reservation is somebody else\'s claim in flight');
+  const same = await Promise.all([run(['next'], root), run(['next'], root)]);
+  assert.deepEqual(same.map((r) => r.code).sort(), [0, 1], JSON.stringify(same));
+  assert.match(same.find((r) => r.code === 1).err, /is in progress here/);
+
+  const other = addWorktree(root, 'wt-b');
+  const third = addWorktree(root, 'wt-c');
+  const two = await Promise.all([run(['next'], other), run(['next'], third)]);
+  assert.deepEqual(two.map((r) => r.code), [0, 0], JSON.stringify(two));
+  assert.notEqual(two[0].out.split(' ')[0], two[1].out.split(' ')[0]);
+});
+
+test('the claim lock waits for a live holder and takes over a dead one', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a'], root);
+  const lock = path.join(pmDir(root), '.state', 'claim.lock');
+  fs.mkdirSync(lock, { recursive: true });
+  fs.writeFileSync(path.join(lock, 'owner'), `${process.pid} 0 live`);
+
+  const r1 = cli(['next'], root, { env: { PM_LOCK_WAIT_MS: '300' } });
+  assert.equal(r1.code, 1);
+  assert.match(r1.err, /the board is busy/);
   assert.equal(status(root, 'T-001'), 'todo');
 
-  cli(['set', 'T-002', 'status=done'], root);
-  const old = new Date(Date.now() - 120_000);
-  fs.utimesSync(lock, old, old);
+  const dead = spawnSync(process.execPath, ['-e', '']).pid;
+  fs.writeFileSync(path.join(lock, 'owner'), `${dead} 0 dead`);
   const r2 = cli(['next'], root);
   assert.equal(r2.code, 0, r2.err);
-  assert.match(r2.out, /^T-001 claimed/, 'a reservation left by a crashed run expires');
-  assert.equal(fs.existsSync(lock), false, 'the reservation is released after the claim');
+  assert.match(r2.out, /^T-001 claimed/);
+  assert.equal(fs.existsSync(lock), false, 'released after the claim');
 });
