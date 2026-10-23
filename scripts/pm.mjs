@@ -5,8 +5,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
-import { hasBoard, initBoard, persist, commitPm, isSyncOn } from './lib/store.mjs';
-import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext } from './lib/tasks.mjs';
+import { hasBoard, initBoard, persist, commitPm, isSyncOn, reserve } from './lib/store.mjs';
+import { listTasks, readTask, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -117,12 +117,21 @@ function takeNext(pm, cwd, epicArg) {
   const all = listTasks(pm);
   const busy = all.find((t) => t.data.status === 'in_progress' && t.data.worktrees.includes(worktreeName(cwd)));
   if (busy) fail(`${busy.id} is in progress here — close it (pm done) or log it first; another task on purpose: pm claim <id>`);
-  const { epic, ready, queue: [t] } = nextQueue(all, cwd, epicArg);
-  if (!t) {
-    if (!epic && ready.length) fail('no epic for this worktree and no repo-wide task ready — pm next --epic KEY, or pm claim <id>');
-    fail(`nothing ready${epic ? ` in epic ${epic}` : ''}`);
+  const { epic, ready, queue } = nextQueue(all, cwd, epicArg);
+  // Two worktrees may run pm next at once: reserve the task, re-read it, and skip one already taken.
+  for (const t of queue) {
+    const release = reserve(pm, `claim-${t.id}`);
+    if (!release) continue;
+    try {
+      if (readTask(pm, t.id).data.status !== 'todo') continue;
+      return `${t.id} claimed by ${claimHere(pm, cwd, t.id)}: ${t.data.title}`;
+    } finally {
+      release();
+    }
   }
-  return `${t.id} claimed by ${claimHere(pm, cwd, t.id)}: ${t.data.title}`;
+  if (queue.length) fail('every ready task is being claimed by another pm next right now — run it again');
+  if (!epic && ready.length) fail('no epic for this worktree and no repo-wide task ready — pm next --epic KEY, or pm claim <id>');
+  fail(`nothing ready${epic ? ` in epic ${epic}` : ''}`);
 }
 
 // One line about a task: its goal, else its understanding, else the last logged next step.

@@ -261,3 +261,25 @@ test("pm next and pm ready put the epic's next marker before the repo-wide one, 
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /^T-003 claimed/);
 });
+
+test('pm next skips a task another pm next is claiming right now, and takes over a stale reservation', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a', '--order', '1'], root);
+  cli(['task', 'new', '--title', 'b', '--order', '2'], root);
+  const lock = path.join(pmDir(root), '.state', 'claim-T-001.lock');
+  fs.mkdirSync(lock, { recursive: true });
+
+  const r1 = cli(['next'], root);
+  assert.equal(r1.code, 0, r1.err);
+  assert.match(r1.out, /^T-002 claimed/, 'a fresh reservation is somebody else\'s claim in flight');
+  assert.equal(status(root, 'T-001'), 'todo');
+
+  cli(['set', 'T-002', 'status=done'], root);
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(lock, old, old);
+  const r2 = cli(['next'], root);
+  assert.equal(r2.code, 0, r2.err);
+  assert.match(r2.out, /^T-001 claimed/, 'a reservation left by a crashed run expires');
+  assert.equal(fs.existsSync(lock), false, 'the reservation is released after the claim');
+});

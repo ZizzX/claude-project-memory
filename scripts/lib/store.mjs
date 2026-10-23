@@ -50,6 +50,28 @@ export function persist(pm, message, tasks) {
 
 const stateFile = (pm, name) => path.join(pm, '.state', `${String(name).replace(/[^\w.-]/g, '_')}.json`);
 
+// An atomic reservation across processes: mkdir fails when the directory exists. A reservation older
+// than `staleMs` was left by a crashed run and is taken over. Returns the release function, or null.
+export function reserve(pm, name, staleMs = 60_000) {
+  const dir = path.join(pm, '.state', `${String(name).replace(/[^\w.-]/g, '_')}.lock`);
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.mkdirSync(dir);
+      return () => fs.rmSync(dir, { recursive: true, force: true });
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let age = 0;
+      try {
+        age = Date.now() - fs.statSync(dir).mtimeMs;
+      } catch {} // released between mkdir and stat: try again
+      if (age && age < staleMs) return null;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  return null;
+}
+
 export function readState(pm, name) {
   try {
     return JSON.parse(fs.readFileSync(stateFile(pm, name), 'utf8'));
