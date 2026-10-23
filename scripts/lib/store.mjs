@@ -50,6 +50,77 @@ export function persist(pm, message, tasks) {
 
 const stateFile = (pm, name) => path.join(pm, '.state', `${String(name).replace(/[^\w.-]/g, '_')}.json`);
 
+const pidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+};
+const ageOf = (file) => {
+  try {
+    return Date.now() - fs.statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+
+// One process at a time runs `fn` for this board: mkdir is atomic, the owner file names the holder.
+// A lock is stale only when its owner is dead (or it is ten minutes old: a reused pid); the stale one is
+// removed under a second lock, after re-reading its owner, so two waiters never both take it over.
+// Release removes the lock only while it is still ours.
+export function withLock(pm, name, fn, waitMs = Number(process.env.PM_LOCK_WAIT_MS) || 10_000) {
+  const dir = path.join(pm, '.state', `${name}.lock`);
+  const ownerFile = path.join(dir, 'owner');
+  const token = `${process.pid} ${Date.now()} ${Math.random().toString(36).slice(2)}`;
+  const owner = () => {
+    try {
+      return fs.readFileSync(ownerFile, 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  const stale = () => {
+    const o = owner();
+    if (o === null) return ageOf(dir) > 5_000; // created but never written: a crash right after mkdir
+    return !pidAlive(Number(o.split(' ')[0])) || ageOf(ownerFile) > 600_000;
+  };
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      fs.mkdirSync(dir);
+      fs.writeFileSync(ownerFile, token);
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+    if (stale()) {
+      const guard = `${dir}.takeover`;
+      try {
+        fs.mkdirSync(guard);
+        try {
+          if (stale()) fs.rmSync(dir, { recursive: true, force: true });
+        } finally {
+          fs.rmSync(guard, { recursive: true, force: true });
+        }
+        continue;
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+        if (ageOf(guard) > 5_000) fs.rmSync(guard, { recursive: true, force: true }); // left by a crash mid-takeover
+      }
+    }
+    if (Date.now() > deadline) throw new Error(`the board is busy: another pm command holds ${dir} — run it again`);
+    sleep(50);
+  }
+  try {
+    return fn();
+  } finally {
+    if (owner() === token) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export function readState(pm, name) {
   try {
     return JSON.parse(fs.readFileSync(stateFile(pm, name), 'utf8'));
