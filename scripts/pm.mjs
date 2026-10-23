@@ -103,7 +103,10 @@ function nextQueue(all, cwd, epicArg) {
   const epic = epicArg?.trim() ?? activeEpic(all, worktreeName(cwd));
   if (epic && epicArg !== undefined && !all.some((t) => t.data.epic === epic)) fail(`unknown epic "${epic}" — pm epics lists them`);
   const ready = readyQueue(all);
-  const queue = (epic ? byEpic(ready, epic) : ready.filter((t) => !t.data.epic)).sort((a, b) => Boolean(b.data.next) - Boolean(a.data.next));
+  // An epic named on purpose starts that direction: its own tasks go before the repo-wide ones.
+  const own = (t) => epicArg !== undefined && t.data.epic === epic;
+  const queue = (epic ? byEpic(ready, epic) : ready.filter((t) => !t.data.epic))
+    .sort((a, b) => own(b) - own(a) || Boolean(b.data.next) - Boolean(a.data.next));
   return { epic, ready, queue };
 }
 

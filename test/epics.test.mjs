@@ -151,7 +151,7 @@ test('summary in a fresh worktree on a multi-epic board: no foreign focus, one t
   const pm = twoEpics();
   const s = buildSummary({ pm, worktree: 'wt-new', scriptPath: 'x' });
   assert.match(s, /^\[pm\] demo · focus: — · board: /);
-  assert.match(s, /no active task — take one from Ready \(pm next\), or say what to work on · a new direction: pm task new --epic <KEY>\n/);
+  assert.match(s, /no active task — take one from Ready \(pm next --options\), or say what to work on · a new direction: pm task new --epic <KEY>\n/);
   assert.match(s, /\nReady: T-002 a-ready \(A\) · T-004 b-ready \(B\) · T-006 shared\n/, 'T-008, the second ready task of A, is folded');
   assert.match(s, /\nWaiting: T-003 \(A\) ← design · T-005 \(B\) ← backend\n/, 'one waiting task per epic');
   for (const id of ['T-004', 'T-005']) setFields(pm, id, { status: 'done' }, D);

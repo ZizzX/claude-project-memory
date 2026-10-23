@@ -232,3 +232,15 @@ test('pm next --options with nothing anywhere says so', () => {
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /\(nothing ready\)/);
 });
+
+test('pm next --epic takes a task of that epic before a repo-wide one, as --options advertises', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'shared', '--epic', '', '--order', '1'], root);
+  cli(['task', 'new', '--title', 'a1', '--epic', 'A', '--order', '2'], root);
+
+  assert.match(cli(['next', '--options'], root).out, /^epic A · 1 ready · first: T-002 a1$/m);
+  const r = cli(['next', '--epic', 'A'], root);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^T-002 claimed/);
+});
