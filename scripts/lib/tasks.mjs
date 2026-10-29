@@ -99,7 +99,8 @@ export function nextNumber(pm) {
 export const idOf = (prefix, n) => `${prefix}-${String(n).padStart(3, '0')}`;
 
 // The id is reserved by creating <PREFIX>-NNN.md exclusively, so concurrent processes never share an id.
-export function newTask(pm, { title, order, deps = [], milestone = '', epic = '', links = [], date }) {
+// created and from (the task it came out of — an origin, not a dependency) are recorded from 0.13.0 on.
+export function newTask(pm, { title, order, deps = [], milestone = '', epic = '', links = [], from = '', date }) {
   const dir = tasksDir(pm);
   fs.mkdirSync(dir, { recursive: true });
   const prefix = taskPrefix(pm);
@@ -127,6 +128,8 @@ export function newTask(pm, { title, order, deps = [], milestone = '', epic = ''
       links,
       updated: date,
       epic,
+      created: date,
+      ...(from && { from }),
     };
     fs.writeSync(fd, serialize(data, TEMPLATE_BODY));
     fs.closeSync(fd);
@@ -197,6 +200,17 @@ export function claim(pm, id, worktree, date, branch = '') {
   // A task awaiting merge keeps its status, branch, pr and review_at; continuing work is `pm set <id> status=in_progress`.
   if (task.data.status === 'review') return setFields(pm, id, { worktrees }, date);
   return setFields(pm, id, { status: 'in_progress', worktrees, ...(branch && { branch }) }, date);
+}
+
+// Free text that goes into a task file as one line: no newline, no list or heading marker in front that would
+// read as a checklist item, a front matter fence or a section, at most `max` characters.
+export function cleanLine(text, max = 200) {
+  let s = String(text ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim();
+  for (let prev; prev !== s;) {
+    prev = s;
+    s = s.replace(/^(?:- \[[ xX]\]|-{3,}|#+)\s*/, '');
+  }
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
 // Log is the last section of a task file, so entries are appended at the end of the body.
@@ -306,7 +320,7 @@ export function validate(tasks) {
     if (t.data.status === 'waiting' && !t.data.waiting_on) problems.push(`${t.id}: waiting without waiting_on`);
     for (const d of t.data.depends_on) {
       if (!byId.has(d)) problems.push(`${t.id}: depends on unknown ${d}`);
-      else if (byId.get(d).data.status === 'dropped') problems.push(`${t.id}: depends on dropped ${d}`);
+      else if (byId.get(d).data.status === 'dropped' && isOpen(t)) problems.push(`${t.id}: depends on dropped ${d}`);
     }
   }
   const state = new Map(); // 1 = on the current path, 2 = finished

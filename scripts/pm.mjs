@@ -17,6 +17,7 @@ import { scanPlans } from './lib/scan.mjs';
 import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
+import { isReminderTitle } from './lib/reminders.mjs';
 import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
 import { listLearnings, readLearning, addLearning, findLearnings, promoteLearning, retireLearning, retroNone, checkRetro, brief, promoteHint } from './lib/learn.mjs';
 import { runAudit, findingLine } from './lib/audit.mjs';
@@ -130,6 +131,17 @@ function takeNext(pm, cwd, epicArg) {
   });
 }
 
+// A nudge after `pm task new`, never a refusal: a reminder is not a task, and a finding of the work in progress here
+// is fixed now or handed to another session. --from or --deps says the task was meant: the busy hint stays quiet.
+const idNumber = (id) => Number(id.match(/\d+$/)?.[0] ?? 0);
+function taskHint(all, worktree, v) {
+  const skip = 'Skip this if the user asked for the task.';
+  if (isReminderTitle(v.title)) return `hint: "${v.title}" reads like a reminder — a wait inside a task is its status (waiting / review), not a new task. ${skip}`;
+  if (v.from !== undefined || list(v.deps).length) return '';
+  const [busy] = all.filter((t) => t.data.status === 'in_progress' && t.data.worktrees.includes(worktree)).sort((a, b) => idNumber(a.id) - idNumber(b.id));
+  return busy ? `hint: ${busy.id} is in progress here — a finding of that work: fix it now (ask first) or offer a separate session; --from ${busy.id} records the origin. ${skip}` : '';
+}
+
 // One line about a task: its goal, else its understanding, else the last logged next step.
 function blurb(t) {
   const first = (name) => {
@@ -174,10 +186,12 @@ const commands = {
 
   task(cwd, [sub, ...args]) {
     if (sub !== 'new') fail(USAGE);
-    const v = strings(args, ['title', 'order', 'deps', 'milestone', 'epic', 'links']);
+    const v = strings(args, ['title', 'order', 'deps', 'milestone', 'epic', 'links', 'from']);
     if (!v.title) fail('--title is required');
     const pm = requireBoard(cwd);
     const all = listTasks(pm);
+    // Checked before newTask reserves an id: a typo in --from leaves no half-made task behind.
+    if (v.from !== undefined && !all.some((t) => t.id === v.from)) fail(`--from ${v.from}: no such task — nothing created — pm ready --all lists tasks`);
     // A task inherits the epic of its worktree; --epic "" makes it repo-wide on purpose.
     const epic = (v.epic ?? activeEpic(all, worktreeName(cwd))).trim();
     const t = newTask(pm, {
@@ -187,11 +201,13 @@ const commands = {
       milestone: v.milestone ?? '',
       epic,
       links: list(v.links),
+      from: v.from ?? '',
       date: today(),
     });
     persist(pm, `pm: task new ${t.id}`);
     const note = epic ? ` (epic ${epic}${all.some((x) => x.data.epic === epic) ? '' : ', new epic'})` : '';
-    return `${t.id} created${note}: ${t.file}`;
+    const hint = taskHint(all, worktreeName(cwd), v);
+    return `${t.id} created${note}: ${t.file}${hint ? `\n${hint}` : ''}`;
   },
 
   set(cwd, [id, ...pairs]) {
@@ -366,10 +382,10 @@ const commands = {
   audit(cwd, args) {
     const fix = parseArgs({ args, options: { fix: { type: 'boolean' } } }).values.fix;
     const pm = requireBoard(cwd);
-    const { findings, fixed } = runAudit({ pm, cwd, fix });
+    const { findings, fixed, stats } = runAudit({ pm, cwd, fix });
     if (fixed.length) writeBoard(pm);
     const lines = [...findings.map(findingLine), ...fixed.map((f) => `fixed: ${f}`)];
-    return lines.join('\n') || 'audit: clean';
+    return [lines.join('\n') || 'audit: clean', stats].filter(Boolean).join('\n');
   },
 
   validate(cwd) {

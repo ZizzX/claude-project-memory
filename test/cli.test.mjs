@@ -113,3 +113,41 @@ test('pm help names learn, next, audit and the close phrases', () => {
   const { out } = cli(['help'], root);
   for (const re of [/^\s+learn add /m, /^\s+next \[/m, /^\s+audit \[--fix\]/m, /\/close/, /"what did we learn"/, /"слил"/]) assert.match(out, re);
 });
+
+test('pm task new records when and from what a task was created; pm show reads both ways', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'parent'], root);
+  const child = cli(['task', 'new', '--title', 'child', '--from', 'T-001'], root);
+  assert.equal(child.code, 0, child.err);
+  const file = fs.readFileSync(path.join(pmDir(root), 'tasks', 'T-002.md'), 'utf8');
+  assert.match(file, /^created: \d{4}-\d{2}-\d{2}$/m);
+  assert.match(file, /^from: T-001$/m);
+  assert.doesNotMatch(file, /^depends_on: \[T-001\]/m, '--from is the origin, not a dependency');
+  assert.match(cli(['show', 'T-002'], root).out, /^created: \d{4}-\d{2}-\d{2} · from: T-001$/m);
+  assert.match(cli(['show', 'T-001'], root).out, /^spawned: T-002 \(todo\)$/m);
+  const bad = cli(['task', 'new', '--title', 'orphan', '--from', 'T-999'], root);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.err, '--from T-999: no such task — nothing created — pm ready --all lists tasks');
+  assert.equal(fs.readdirSync(path.join(pmDir(root), 'tasks')).filter((f) => f.endsWith('.md')).length, 2, 'no id was reserved');
+});
+
+test('pm task new hints when this worktree is busy, or when the title reads like a reminder; never blocks', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  const quiet = cli(['task', 'new', '--title', 'a'], root);
+  assert.equal(quiet.out.split('\n').length, 1, 'nothing in progress here');
+  cli(['task', 'new', '--title', 'b'], root);
+  cli(['claim', 'T-002'], root);
+  cli(['claim', 'T-001'], root);
+  const busy = cli(['task', 'new', '--title', 'c'], root);
+  assert.equal(busy.code, 0);
+  assert.equal(busy.out.split('\n')[1], 'hint: T-001 is in progress here — a finding of that work: fix it now (ask first) or offer a separate session; --from T-001 records the origin. Skip this if the user asked for the task.', 'the lowest id');
+  assert.match(cli(['task', 'new', '--title', 'd', '--epic', 'A'], root).out, /\nhint: T-001 is in progress here/, '--epic alone does not quiet it');
+  for (const extra of [['--from', 'T-001'], ['--deps', 'T-001']]) {
+    assert.equal(cli(['task', 'new', '--title', 'e', ...extra], root).out.split('\n').length, 1, `quiet with ${extra[0]}`);
+  }
+  const reminder = cli(['task', 'new', '--title', 'Remove the SEARCH_V2 flag after the prod tag', '--from', 'T-001'], root);
+  assert.equal(reminder.code, 0);
+  assert.equal(reminder.out.split('\n')[1], 'hint: "Remove the SEARCH_V2 flag after the prod tag" reads like a reminder — a wait inside a task is its status (waiting / review), not a new task. Skip this if the user asked for the task.');
+});

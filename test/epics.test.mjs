@@ -24,7 +24,7 @@ test('epic is a plain scalar field: empty by default, unquoted, trimmed on read'
   const pm = tmp();
   newTask(pm, { title: 'plain', date: D });
   newTask(pm, { title: 'tagged', epic: 'ATS-1224', date: D });
-  assert.match(fs.readFileSync(`${pm}/tasks/T-001.md`, 'utf8'), /\nupdated: 2026-09-14\nepic: ""\n---\n/, 'last field, like a migrated file');
+  assert.match(fs.readFileSync(`${pm}/tasks/T-001.md`, 'utf8'), /\nupdated: 2026-09-14\nepic: ""\ncreated: 2026-09-14\n---\n/, 'after updated, like a migrated file; created comes last');
   assert.match(fs.readFileSync(`${pm}/tasks/T-002.md`, 'utf8'), /\nepic: ATS-1224\n/);
   setFields(pm, 'T-001', { epic: 'ATS-1224 ' }, D);
   assert.deepEqual(listTasks(pm).map((t) => t.data.epic), ['ATS-1224', 'ATS-1224']);

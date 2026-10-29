@@ -53,6 +53,8 @@ function boardHistory(pm, id) {
 export function showTask(pm, cwd, id) {
   const { data } = readTask(pm, id);
   const lines = [`${id} ${data.title} · ${data.status}${data.epic ? ` · epic ${data.epic}` : ''}`];
+  const origin = [data.created && `created: ${data.created}`, data.from && `from: ${data.from}`].filter(Boolean).join(' · ');
+  if (origin) lines.push(origin);
   if (data.branch) lines.push(`branch: ${data.branch}`);
   const pr = prInfo(data, cwd);
   if (pr) lines.push(prLine(pr));
@@ -76,6 +78,8 @@ export function showTask(pm, cwd, id) {
   const tasks = listTasks(pm);
   const dependents = tasks.filter((t) => t.data.depends_on.includes(id));
   if (dependents.length) lines.push(`depended on by: ${dependents.map((t) => `${t.id} (${t.data.status})`).join(', ')}`);
+  const spawned = tasks.filter((t) => t.data.from === id);
+  if (spawned.length) lines.push(`spawned: ${spawned.map((t) => `${t.id} (${t.data.status})`).join(', ')}`);
   const plan = undoPlan({ cwd, id, tasks, commits, pr });
   if (plan) lines.push(...undoLines(plan));
   return lines.join('\n');

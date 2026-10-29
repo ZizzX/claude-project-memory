@@ -188,3 +188,22 @@ test('the weekly line ignores dead worktrees it cannot fix on a synced board', (
   assert.equal(auditLine(pm, root, NOW), '');
   assert.match(cli(['audit'], root).out, /^dead-worktree T-001 — worktree other-machine is not on this machine — synced board: check there before pm set worktrees=…$/m);
 });
+
+test('stats: of the tasks created in 30 days — dropped before any work, and still only a title', () => {
+  const { root, pm } = board();
+  assert.equal(runAudit({ pm, cwd: root, now: NOW }).stats, '', 'a board without created dates prints nothing');
+  newTask(pm, { title: 'dropped untouched', date: ago(5) });
+  appendLogLine(pm, 'T-001', `- ${ago(4)} · wt · later#1: an idea`, ago(4));
+  setFields(pm, 'T-001', { status: 'dropped' }, ago(4));
+  newTask(pm, { title: 'dropped after work', date: ago(5) });
+  appendLog(pm, 'T-002', { worktree: 'wt', did: 'tried it', next: '—', date: ago(4) });
+  setFields(pm, 'T-002', { status: 'dropped' }, ago(4));
+  newTask(pm, { title: 'only a title', date: ago(20) });
+  newTask(pm, { title: 'fresh title', date: ago(3) });
+  newTask(pm, { title: 'old and dropped', date: ago(40) });
+  setFields(pm, 'T-005', { status: 'dropped' }, ago(40));
+  const r = runAudit({ pm, cwd: root, now: NOW });
+  assert.equal(r.stats, 'stats (30 days): 4 tasks created · 1 dropped without a did: line · 1 empty 14+ days');
+  assert.ok(!r.findings.some((f) => f.code === 'stats'), 'a line, not a finding');
+  assert.match(cli(['audit'], root).out, /^stats \(30 days\): /m);
+});
