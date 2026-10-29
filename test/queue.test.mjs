@@ -50,6 +50,17 @@ test('validate reports every kind of problem', () => {
   ].sort());
 });
 
+test('validate: a dropped dependency is a problem only while the dependent is still open', () => {
+  const tasks = (status) => [mk('T-001', { status: 'dropped' }), mk('T-002', { status, depends_on: ['T-001'] })];
+  assert.deepEqual(validate(tasks('dropped')), [], 'dropped together with its dependency');
+  assert.deepEqual(validate(tasks('done')), [], 'done before its dependency was dropped');
+  assert.deepEqual(validate(tasks('review')), ['T-002: depends on dropped T-001']);
+});
+
+test('validate: a 0.12.0 task (no created, an unknown field) is valid', () => {
+  assert.deepEqual(validate([mk('T-001', { reviewer: 'someone' })]), []);
+});
+
 test('a healthy board has no problems', () => {
   assert.deepEqual(validate([mk('T-001'), mk('T-002', { depends_on: ['T-001'] }), mk('T-003', { status: 'review' })]), []);
 });

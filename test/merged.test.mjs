@@ -533,3 +533,37 @@ test('pm done: a reused branch whose PR was merged before the newest commit awai
   const closed = cli(['done', 'T-001', '--pr', 'https://github.com/o/r/pull/16'], root, { env: { PM_FORGE_FIXTURE: fixture } });
   assert.match(closed.out, /^T-001 → review: #16 was closed without merging; /);
 });
+
+// --- epic progress after closing ---
+
+test('pm done: one line for the epic of the closed task — what is left, or that it was the last one', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  for (const title of ['a1', 'a2']) cli(['task', 'new', '--title', title, '--epic', 'A'], root);
+  cli(['task', 'new', '--title', 'b1', '--epic', 'B'], root);
+  cli(['task', 'new', '--title', 'wide', '--epic', ''], root);
+  cli(['claim', 'T-003'], root);
+  assert.equal(cli(['done', 'T-001', '--did', 'x', '--no-merge'], root).out, 'T-001 → done: --no-merge\nepic A: 1 left (1 ready)', "the task's epic, not the worktree's");
+  cli(['claim', 'T-002'], root);
+  const review = cli(['done', 'T-002', '--did', 'x', '--pr', 'https://github.com/o/r/pull/15'], root);
+  assert.match(review.out, /^T-002 → review: [^\n]+\nepic A: 1 left \(1 in review\)$/, 'a task awaiting its merge is still open');
+  cli(['set', 'T-002', 'status=in_progress'], root);
+  const last = cli(['done', 'T-002', '--did', 'x', '--no-merge'], root);
+  assert.equal(last.out, 'T-002 → done: --no-merge\nepic A: that was the last open task — no open tracked tasks. Update or remove its focus line in PLAN.md; /close asks which direction is next.');
+  assert.equal(cli(['done', 'T-004', '--did', 'x', '--no-merge'], root).out, 'T-004 → done: --no-merge', 'a repo-wide task adds nothing');
+});
+
+test('pm reconcile: one epic line per epic, counted after the whole batch', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  for (const title of ['a1', 'a2', 'a3']) cli(['task', 'new', '--title', title, '--epic', 'A'], root);
+  for (const id of ['T-001', 'T-002']) cli(['set', id, 'status=review', 'review_at=2026-01-01T00:00:00.000Z'], root);
+  const now = new Date().toISOString();
+  commit(root, 'feat(T-001): part a', now);
+  commit(root, 'feat(T-002): part b', now);
+  publish(root);
+  const r = cli(['reconcile', '--no-fetch'], root);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^Closed: T-001 .+, T-002 /m);
+  assert.deepEqual(r.out.split('\n').filter((l) => l.startsWith('epic ')), ['epic A: 1 left (1 ready)']);
+});

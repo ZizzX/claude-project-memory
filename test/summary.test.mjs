@@ -145,3 +145,34 @@ test('an epic worktree also leads with a repo-wide next task', () => {
   setNext(pm, 'T-005', D);
   assert.match(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /Ready: T-005 shared ← next · T-002 a2 · T-003 a3/);
 });
+
+test('summary: the epic line says how much of the epic is left, or that nothing is open', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  newTask(pm, { title: 'a1', epic: 'A', date: D });
+  claim(pm, 'T-001', 'wt-a', D);
+  newTask(pm, { title: 'a2', epic: 'A', date: D });
+  newTask(pm, { title: 'a3', epic: 'A', deps: ['T-001'], date: D });
+  newTask(pm, { title: 'b1', epic: 'B', date: D });
+  claim(pm, 'T-004', 'wt-b', D);
+  const s = buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' });
+  assert.match(s, /\n {2}T-001 a1 \[in_progress\]\nEpic A: 3 left of 3 \(1 ready, 1 blocked, 1 in progress\)\nElsewhere: /);
+  for (const id of ['T-001', 'T-002', 'T-003']) setFields(pm, id, { status: 'done' }, D);
+  const done = buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' });
+  assert.match(done, /^\[pm\] demo · epic A · /, 'the header keeps the epic');
+  assert.match(done, /\nEpic A: no open tracked tasks \(3 done\) — ask the user which direction is next: pm next --options\n/);
+  assert.doesNotMatch(done, /finished/);
+  for (const id of ['T-001', 'T-002', 'T-003']) setFields(pm, id, { status: 'dropped' }, D);
+  assert.match(buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' }), /\nEpic A: no open tracked tasks \(3 dropped\) — /);
+  assert.doesNotMatch(buildSummary({ pm, worktree: 'wt-c', scriptPath: 'x' }), /^Epic /m, 'a worktree without an epic');
+});
+
+test('summary over the cap keeps the header and the epic line', () => {
+  const pm = tmp();
+  fs.writeFileSync(planFile(pm), planTemplate('demo', D));
+  for (let i = 0; i < 45; i += 1) claim(pm, newTask(pm, { title: `t${i}`, epic: 'A', date: D }).id, 'wt-a', D);
+  const s = buildSummary({ pm, worktree: 'wt-a', scriptPath: 'x' });
+  assert.equal(s.split('\n').length, MAX_LINES);
+  assert.match(s, /^\[pm\] demo · epic A · /);
+  assert.match(s, /\n {2}… \d+ more lines — see BOARD\.md\nEpic A: 45 left of 45 \(45 in progress\)\n/);
+});

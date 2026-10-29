@@ -8,7 +8,7 @@ import { readDecisions } from './decisions.mjs';
 
 // Deterministic housekeeping: no LLM, no status changes, no deletions of tasks, learnings or decisions.
 export const AUDIT_DAYS = 7;
-export const DAYS = { stuck: 14, waiting: 30, next: 30, state: 7, learning: 90, retro: 30 };
+export const DAYS = { stuck: 14, waiting: 30, next: 30, state: 7, learning: 90, retro: 30, empty: 14, stats: 30 };
 export const CAP_WARN = 80;
 const DAY = 86_400_000;
 
@@ -18,6 +18,21 @@ function liveWorktrees(cwd) {
   const out = tryGit(['worktree', 'list', '--porcelain'], cwd);
   if (out === null) return null; // not a git checkout: nothing can be called dead
   return new Set(out.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => path.basename(l.slice('worktree '.length).trim())));
+}
+
+// Only a title: an open todo with no text besides the template headings, untouched and created 14+ days ago.
+export const isEmptyTask = (t, now) => t.data.status === 'todo'
+  && !t.body.replace(/^## (?:Goal|Understanding|Checklist|Log)[ \t]*$/gm, '').trim()
+  && olderThan(t.data.updated, DAYS.empty, now) && (!t.data.created || olderThan(t.data.created, DAYS.empty, now));
+
+// Whether tasks stopped piling up: of those created in the last 30 days, how many were dropped before any work was
+// logged (no ` · did: ` line) and how many are still only a title. A board without created dates says nothing.
+function statsLine(tasks, now) {
+  if (!tasks.some((t) => t.data.created)) return '';
+  const recent = tasks.filter((t) => t.data.created && !olderThan(t.data.created, DAYS.stats, now));
+  const untouched = recent.filter((t) => t.data.status === 'dropped' && !/ · did: /.test(t.body)).length;
+  const empty = recent.filter((t) => isEmptyTask(t, now)).length;
+  return `stats (${DAYS.stats} days): ${recent.length} tasks created · ${untouched} dropped without a did: line · ${empty} empty ${DAYS.empty}+ days`;
 }
 
 export function runAudit({ pm, cwd, now = Date.now(), fix = false }) {
@@ -99,7 +114,7 @@ export function runAudit({ pm, cwd, now = Date.now(), fix = false }) {
     for (const f of findings) if (f.fixable) fixed.push(f.apply());
     if (fixed.length) commitPm(pm, 'pm: audit --fix');
   }
-  return { findings, fixed };
+  return { findings, fixed, stats: statsLine(tasks, now) };
 }
 
 export const findingLine = (f) => `${f.code} ${f.id} — ${f.text} — ${f.how}`;

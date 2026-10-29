@@ -310,3 +310,23 @@ test('the claim lock waits for a live holder and takes over a dead one', () => {
   assert.match(r2.out, /^T-001 claimed/);
   assert.equal(fs.existsSync(lock), false, 'released after the claim');
 });
+
+test('pm next in an epic with nothing ready says why, and --options carries the same reason', () => {
+  const { root } = setup();
+  cli(['init'], root);
+  cli(['task', 'new', '--title', 'a1', '--epic', 'A'], root);
+  cli(['claim', 'T-001'], root);
+  cli(['done', 'T-001', '--did', 'x', '--no-merge'], root);
+  const empty = cli(['next'], root);
+  assert.equal(empty.code, 1);
+  assert.equal(empty.err, 'nothing ready in epic A — no open tracked tasks (1 done) — pm next --options shows other epics, or pm task new --epic A');
+  assert.match(cli(['next', '--options'], root).out, /^\(nothing ready\) — epic A: no open tracked tasks \(1 done\)$/m);
+  cli(['task', 'new', '--title', 'a2'], root);
+  cli(['set', 'T-002', 'status=waiting', 'waiting_on=API key'], root);
+  cli(['task', 'new', '--title', 'a3'], root);
+  cli(['set', 'T-003', 'status=in_progress', 'worktrees=other-wt'], root);
+  const none = cli(['next'], root);
+  assert.equal(none.code, 1);
+  assert.equal(none.err, 'nothing ready in epic A — 2 open, none ready (1 in progress, 1 waiting) — pm next --options shows other epics');
+  assert.match(cli(['next', '--options'], root).out, /^\(nothing ready\) — epic A: 2 open, none ready \(1 in progress, 1 waiting\)$/m);
+});

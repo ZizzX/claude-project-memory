@@ -58,14 +58,15 @@ test('pm show: header, branch, pr, timeline, commits, decisions and dependents; 
   assert.equal(r.code, 0, r.err);
   const lines = r.out.split('\n');
   assert.equal(lines[0], 'T-001 export · done · epic ATS-1');
-  assert.equal(lines[1], 'branch: main');
-  assert.match(lines[2], new RegExp(`^pr: https://github\\.com/o/r/pull/7 · merged ${STAMP} · merge a1b2c3d4e5f6 · @aziz$`));
-  assert.match(lines[3], new RegExp(`^timeline: created ${STAMP} test · claimed ${STAMP} test · done ${STAMP} test$`));
-  assert.equal(lines[4], 'commits (1):');
-  assert.match(lines[5], new RegExp(`^  ${sha} ${STAMP} test  feat: csv writer$`));
-  assert.equal(lines[6], 'decisions: D-001 stream rows');
-  assert.equal(lines[7], 'depended on by: T-002 (todo)');
-  assert.equal(lines[8], 'undo:', 'the commit is in HEAD, so an undo block follows');
+  assert.match(lines[1], /^created: \d{4}-\d{2}-\d{2}$/);
+  assert.equal(lines[2], 'branch: main');
+  assert.match(lines[3], new RegExp(`^pr: https://github\\.com/o/r/pull/7 · merged ${STAMP} · merge a1b2c3d4e5f6 · @aziz$`));
+  assert.match(lines[4], new RegExp(`^timeline: created ${STAMP} test · claimed ${STAMP} test · done ${STAMP} test$`));
+  assert.equal(lines[5], 'commits (1):');
+  assert.match(lines[6], new RegExp(`^  ${sha} ${STAMP} test  feat: csv writer$`));
+  assert.equal(lines[7], 'decisions: D-001 stream rows');
+  assert.equal(lines[8], 'depended on by: T-002 (todo)');
+  assert.equal(lines[9], 'undo:', 'the commit is in HEAD, so an undo block follows');
   assert.equal(sh(['rev-parse', 'HEAD'], pm), head, 'no board commit');
   assert.equal(sh(['status', '--porcelain'], pm), '', 'no board write');
 });
@@ -83,7 +84,7 @@ test('pm show on a task without git fields prints only what exists', () => {
   const { root } = setup();
   cli(['init'], root);
   cli(['task', 'new', '--title', 'plain'], root);
-  assert.match(cli(['show', 'T-001'], root).out, new RegExp(`^T-001 plain · todo\\ntimeline: created ${STAMP} test$`));
+  assert.match(cli(['show', 'T-001'], root).out, new RegExp(`^T-001 plain · todo\\ncreated: \\d{4}-\\d{2}-\\d{2}\\ntimeline: created ${STAMP} test$`));
 });
 
 test('pm show: no linked commits yet is explained; a rewritten SHA is marked', () => {

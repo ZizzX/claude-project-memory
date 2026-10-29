@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp } from './helpers.mjs';
-import { newTask, listTasks, readTask, setFields, claim, appendLog, appendLogLine, lastNext, taskPrefix, setTaskPrefix } from '../scripts/lib/tasks.mjs';
+import { newTask, listTasks, readTask, setFields, claim, appendLog, appendLogLine, lastNext, taskPrefix, setTaskPrefix, epicProgress, epicParts, epicClosed, cleanLine } from '../scripts/lib/tasks.mjs';
 
 const D = '2026-09-12';
 
@@ -18,8 +18,12 @@ test('newTask creates sequential ids from the template', () => {
   assert.equal(t.data.order, 2);
   assert.deepEqual(t.data.depends_on, ['T-001']);
   assert.equal(t.data.updated, D);
+  assert.equal(t.data.created, D);
+  assert.equal(t.data.from, undefined, 'no origin, no field');
+  assert.equal(newTask(pm, { title: 'Third', from: 'T-001', date: D }).data.from, 'T-001');
+  assert.equal(readTask(pm, 'T-003').data.from, 'T-001');
   assert.match(t.body, /^## Goal\n\n## Understanding\n\n## Checklist\n\n## Log\n$/);
-  assert.deepEqual(listTasks(pm).map((x) => x.id), ['T-001', 'T-002']);
+  assert.deepEqual(listTasks(pm).map((x) => x.id), ['T-001', 'T-002', 'T-003']);
 });
 
 test('newTask skips ids that already exist', () => {
@@ -160,4 +164,45 @@ test('review: claim keeps it awaiting merge; leaving review drops review_at', ()
   const back = setFields(pm, 'T-001', { status: 'in_progress' }, D);
   assert.equal(back.data.review_at, undefined);
   assert.doesNotMatch(fs.readFileSync(back.file, 'utf8'), /review_at/);
+});
+
+test('epicProgress: the parts of one epic sum to open; dropped tasks stay out of the total', () => {
+  const pm = tmp();
+  const mk = (title, epic, fields, deps = []) => {
+    const t = newTask(pm, { title, epic, deps, date: D });
+    if (fields) setFields(pm, t.id, fields, D);
+  };
+  mk('done', 'A', { status: 'done' });
+  mk('ready', 'A');
+  mk('blocked', 'A', null, ['T-004']);
+  mk('doing', 'A', { status: 'in_progress' });
+  mk('waits', 'A', { status: 'waiting', waiting_on: 'API key' });
+  mk('merge', 'A', { status: 'review' });
+  mk('gone', 'A', { status: 'dropped' });
+  mk('other', 'B');
+  mk('wide', '');
+  const p = epicProgress(listTasks(pm), 'A');
+  assert.deepEqual(p, { open: 5, ready: 1, blocked: 1, inProgress: 1, waiting: 1, review: 1, done: 1, dropped: 1, total: 6 });
+  assert.equal(epicParts(p), '1 ready, 1 blocked, 1 in progress, 1 waiting, 1 in review');
+  assert.equal(epicParts(epicProgress(listTasks(pm), 'B')), '1 ready', 'zero parts are left out; repo-wide tasks are not counted');
+  assert.equal(epicClosed(p), '1 done');
+  for (const id of ['T-002', 'T-003', 'T-004', 'T-005', 'T-006']) setFields(pm, id, { status: 'dropped' }, D);
+  setFields(pm, 'T-001', { status: 'dropped' }, D);
+  assert.equal(epicClosed(epicProgress(listTasks(pm), 'A')), '7 dropped', 'every task dropped');
+});
+
+test('cleanLine: one line, no list or heading marker in front, at most 200 characters', () => {
+  assert.equal(cleanLine('  first\nsecond\r\n third  '), 'first second third');
+  assert.equal(cleanLine('- [ ] remind: x'), 'remind: x');
+  assert.equal(cleanLine('- [x] done'), 'done');
+  assert.equal(cleanLine('--- \n## Log'), 'Log');
+  assert.equal(cleanLine('# heading'), 'heading');
+  assert.equal(cleanLine('a - [ ] in the middle stays'), 'a - [ ] in the middle stays');
+  const long = cleanLine('x'.repeat(201));
+  assert.equal(long.length, 200);
+  assert.ok(long.endsWith('…'));
+  assert.equal(cleanLine(' \n - [ ] '), '', 'nothing left');
+  const emoji = cleanLine('😀'.repeat(250));
+  assert.equal([...emoji].length, 200, 'counted in characters');
+  assert.doesNotMatch(emoji, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/, 'no half of a surrogate pair');
 });

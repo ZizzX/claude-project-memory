@@ -99,7 +99,8 @@ export function nextNumber(pm) {
 export const idOf = (prefix, n) => `${prefix}-${String(n).padStart(3, '0')}`;
 
 // The id is reserved by creating <PREFIX>-NNN.md exclusively, so concurrent processes never share an id.
-export function newTask(pm, { title, order, deps = [], milestone = '', epic = '', links = [], date }) {
+// created and from (the task it came out of — an origin, not a dependency) are recorded from 0.13.0 on.
+export function newTask(pm, { title, order, deps = [], milestone = '', epic = '', links = [], from = '', date }) {
   const dir = tasksDir(pm);
   fs.mkdirSync(dir, { recursive: true });
   const prefix = taskPrefix(pm);
@@ -127,6 +128,8 @@ export function newTask(pm, { title, order, deps = [], milestone = '', epic = ''
       links,
       updated: date,
       epic,
+      created: date,
+      ...(from && { from }),
     };
     fs.writeSync(fd, serialize(data, TEMPLATE_BODY));
     fs.closeSync(fd);
@@ -199,6 +202,19 @@ export function claim(pm, id, worktree, date, branch = '') {
   return setFields(pm, id, { status: 'in_progress', worktrees, ...(branch && { branch }) }, date);
 }
 
+// Free text that goes into a task file as one line: no newline, no list or heading marker in front that would
+// read as a checklist item, a front matter fence or a section, no ` · ` that would read as a Log field (did:,
+// next:), at most `max` characters (not UTF-16 units: an emoji is never cut in half).
+export function cleanLine(text, max = 200) {
+  let s = String(text ?? '').replace(/\s*[\r\n]+\s*/g, ' ').replace(/\s*·\s*/g, ' - ').trim();
+  for (let prev; prev !== s;) {
+    prev = s;
+    s = s.replace(/^(?:- \[[ xX]\]|-{3,}|#+)\s*/, '');
+  }
+  const chars = [...s];
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : s;
+}
+
 // Log is the last section of a task file, so entries are appended at the end of the body.
 export function appendLogLine(pm, id, line, date) {
   const task = readTask(pm, id);
@@ -255,6 +271,41 @@ export function activeEpic(tasks, worktree) {
   return found.size === 1 ? [...found][0] : '';
 }
 
+// One epic's tasks by state (its own key only, repo-wide tasks are not part of it). The printed parts — ready,
+// blocked, in progress, waiting, in review — sum to open; total leaves dropped tasks out.
+export function epicProgress(tasks, epic) {
+  const status = new Map(tasks.map((t) => [t.id, t.data.status]));
+  const met = (t) => t.data.depends_on.every((d) => ['done', 'dropped'].includes(status.get(d)));
+  const own = tasks.filter((t) => t.data.epic === epic);
+  const count = (fn) => own.filter(fn).length;
+  const is = (s) => (t) => t.data.status === s;
+  return {
+    open: count(isOpen),
+    ready: count((t) => is('todo')(t) && met(t)),
+    blocked: count((t) => is('todo')(t) && !met(t)),
+    inProgress: count(is('in_progress')),
+    waiting: count(is('waiting')),
+    review: count(is('review')),
+    done: count(is('done')),
+    dropped: count(is('dropped')),
+    total: count((t) => !is('dropped')(t)),
+  };
+}
+
+const PARTS = [['ready', 'ready'], ['blocked', 'blocked'], ['inProgress', 'in progress'], ['waiting', 'waiting'], ['review', 'in review']];
+export const epicParts = (p) => PARTS.filter(([k]) => p[k]).map(([k, label]) => `${p[k]} ${label}`).join(', ');
+// How an epic without open tasks ended: its done count, or its dropped count when nothing was done.
+export const epicClosed = (p) => (p.done || !p.dropped ? `${p.done} done` : `${p.dropped} dropped`);
+// Why an epic has nothing ready: what is still open, or that nothing is.
+export const epicNothingReady = (p) => (p.open ? `${p.open} open, none ready (${epicParts(p)})` : `no open tracked tasks (${epicClosed(p)})`);
+
+// pm done and pm reconcile, after closing: what is left of the epic, or that its last open task just closed.
+export function epicLeftLine(tasks, epic) {
+  const p = epicProgress(tasks, epic);
+  if (p.open) return `epic ${epic}: ${p.open} left (${epicParts(p)})`;
+  return `epic ${epic}: that was the last open task — no open tracked tasks. Update or remove its focus line in PLAN.md; /close asks which direction is next.`;
+}
+
 export function readyQueue(tasks) {
   const status = new Map(tasks.map((t) => [t.id, t.data.status]));
   return tasks
@@ -271,7 +322,7 @@ export function validate(tasks) {
     if (t.data.status === 'waiting' && !t.data.waiting_on) problems.push(`${t.id}: waiting without waiting_on`);
     for (const d of t.data.depends_on) {
       if (!byId.has(d)) problems.push(`${t.id}: depends on unknown ${d}`);
-      else if (byId.get(d).data.status === 'dropped') problems.push(`${t.id}: depends on dropped ${d}`);
+      else if (byId.get(d).data.status === 'dropped' && isOpen(t)) problems.push(`${t.id}: depends on dropped ${d}`);
     }
   }
   const state = new Map(); // 1 = on the current path, 2 = finished

@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn, withLock } from './lib/store.mjs';
-import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext } from './lib/tasks.mjs';
+import { listTasks, readTask, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext, epicProgress, epicNothingReady, epicLeftLine } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -17,6 +17,8 @@ import { scanPlans } from './lib/scan.mjs';
 import { installAliases } from './lib/alias.mjs';
 import { syncTarget, syncOn, syncOff, pushNow, conflictFiles, linkMemory, memorySyncEnabled } from './lib/sync.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote } from './lib/hooks.mjs';
+import { isReminderTitle } from './lib/reminders.mjs';
+import { addLater, openLater, pickLater, resolveLater } from './lib/later.mjs';
 import { runMergeCheck, reconcile, markDone, BACKGROUND_LOOKUPS } from './lib/merged.mjs';
 import { listLearnings, readLearning, addLearning, findLearnings, promoteLearning, retireLearning, retroNone, checkRetro, brief, promoteHint } from './lib/learn.mjs';
 import { runAudit, findingLine } from './lib/audit.mjs';
@@ -25,11 +27,16 @@ import { refreshLatest,updateAvailable, updateCommands, notifyMode, snoozed, set
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = `usage: pm <command>
   init                                         create the local board for this repo
-  task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b]
+  task new --title T [--order N] [--deps T-001,T-002] [--milestone M1] [--epic KEY | --epic ""] [--links a,b] [--from <id> [--later N]]
+                                               --from <id> records where the task came from, not a dependency (that is --deps);
+                                               --later N also resolves that task's later#N. e.g. pm task new --title "csv export" --from T-012
   set <id> key=value ...                       update task fields (status, order, depends_on, waiting_on, epic, pr, ...)
   claim <id>                                   attach this worktree and set in_progress (a review task keeps review)
   log <id> --did "..." --next "..."            append a work log entry
   done <id> [--did "..."] [--pr url | --no-merge]  finished and verified: done, or review until its merge closes it
+  later <id> "<text>"                          a finding the user declined, kept on the task as later#n — e.g. pm later T-012 "dates lose the zone"
+  later [<id>] | later <id> --keep|--dismiss <n,…|all>
+                                               the open later items (this worktree's tasks), or resolve them — /close asks once
   show <id>                                    task history: branch, pr, timeline, commits, decisions, dependents
   decision --title T --why W --rejected R [--tasks T-001,T-002]
   ready [--epic KEY | --all]                   ready tasks of this worktree's epic (default), one epic, or all
@@ -56,6 +63,7 @@ const PHRASES = `In a Claude Code session you rarely run these yourself — say 
   "what's next?"                               pm next --options: choose a task, another epic, or your own work
   "take the next one"                          pm next: claim the next ready task of this worktree's epic
   "break it down"                              turn a large request into tasks (with --epic and a linked plan)
+  "not now" about a finding                    pm later: kept on the task as later#n, no new task; /close asks about it once
   "remember …"                                 record a decision, a project fact or a task detail
   "waiting for …"                              mark the active task blocked, with the reason
   "we're done" / "continue in a new session"   log did/next on active tasks, so /clear is safe
@@ -79,6 +87,14 @@ Closing tasks after a merge (pm done, pm reconcile): https://github.com/ZizzX/cl
 class UsageError extends Error {}
 const fail = (msg) => {
   throw new UsageError(msg);
+};
+// A library refusal that is the user's to fix, printed like a usage error (no "pm:" prefix).
+const attempt = (fn) => {
+  try {
+    return fn();
+  } catch (e) {
+    return fail(e.message);
+  }
 };
 const list = (s) => (s ? s.split(',').map((x) => x.trim()).filter(Boolean) : []);
 const strings = (args, names) => parseArgs({ args, options: Object.fromEntries(names.map((n) => [n, { type: 'string' }])) }).values;
@@ -122,10 +138,23 @@ function takeNext(pm, cwd, epicArg) {
     const { epic, ready, queue: [t] } = nextQueue(all, cwd, epicArg);
     if (!t) {
       if (!epic && ready.length) fail('no epic for this worktree and no repo-wide task ready — pm next --epic KEY, or pm claim <id>');
-      fail(`nothing ready${epic ? ` in epic ${epic}` : ''}`);
+      if (!epic) fail('nothing ready');
+      const p = epicProgress(all, epic);
+      fail(`nothing ready in epic ${epic} — ${epicNothingReady(p)} — pm next --options shows other epics${p.open ? '' : `, or pm task new --epic ${epic}`}`);
     }
     return `${t.id} claimed by ${claimHere(pm, cwd, t.id)}: ${t.data.title}`;
   });
+}
+
+// A nudge after `pm task new`, never a refusal: a reminder is not a task, and a finding of the work in progress here
+// is fixed now or handed to another session. --from or --deps says the task was meant: the busy hint stays quiet.
+const idNumber = (id) => Number(id.match(/\d+$/)?.[0] ?? 0);
+function taskHint(all, worktree, v) {
+  const skip = 'Skip this if the user asked for the task.';
+  if (isReminderTitle(v.title)) return `hint: "${v.title}" reads like a reminder — a wait inside a task is its status (waiting / review), not a new task. ${skip}`;
+  if (v.from !== undefined || list(v.deps).length) return '';
+  const [busy] = all.filter((t) => t.data.status === 'in_progress' && t.data.worktrees.includes(worktree)).sort((a, b) => idNumber(a.id) - idNumber(b.id));
+  return busy ? `hint: ${busy.id} is in progress here — a finding of that work: fix it now (ask first) or offer a separate session; --from ${busy.id} records the origin. ${skip}` : '';
 }
 
 // One line about a task: its goal, else its understanding, else the last logged next step.
@@ -155,7 +184,8 @@ function nextOptions(pm, cwd, epicArg) {
   });
   const head = epic ? `# epic ${epic}` : known.size ? '# no epic for this worktree — a task of another epic starts that direction here' : '#';
   const body = [...current, ...tasks, ...epics];
-  return [`${head} · pick one, or say what to work on`, ...(body.length ? body : ['(nothing ready)'])].join('\n');
+  const none = `(nothing ready)${epic ? ` — epic ${epic}: ${epicNothingReady(epicProgress(all, epic))}` : ''}`;
+  return [`${head} · pick one, or say what to work on`, ...(body.length ? body : [none])].join('\n');
 }
 
 const conflictHelp = (pm) => `sync conflict in: ${(conflictFiles(pm) ?? []).join(', ') || 'unknown files'}
@@ -171,10 +201,14 @@ const commands = {
 
   task(cwd, [sub, ...args]) {
     if (sub !== 'new') fail(USAGE);
-    const v = strings(args, ['title', 'order', 'deps', 'milestone', 'epic', 'links']);
+    const v = strings(args, ['title', 'order', 'deps', 'milestone', 'epic', 'links', 'from', 'later']);
     if (!v.title) fail('--title is required');
+    if (v.later !== undefined && v.from === undefined) fail('--later needs --from — pm task new --title … --from <id> --later <n>');
     const pm = requireBoard(cwd);
     const all = listTasks(pm);
+    // Checked before newTask reserves an id: a typo in --from leaves no half-made task behind.
+    if (v.from !== undefined && !all.some((t) => t.id === v.from)) fail(`--from ${v.from}: no such task — nothing created — pm ready --all lists tasks`);
+    const later = v.later === undefined ? [] : attempt(() => pickLater(all.find((t) => t.id === v.from), v.later, 'nothing created — '));
     // A task inherits the epic of its worktree; --epic "" makes it repo-wide on purpose.
     const epic = (v.epic ?? activeEpic(all, worktreeName(cwd))).trim();
     const t = newTask(pm, {
@@ -184,11 +218,14 @@ const commands = {
       milestone: v.milestone ?? '',
       epic,
       links: list(v.links),
+      from: v.from ?? '',
       date: today(),
     });
+    if (later.length) resolveLater(pm, v.from, later, `→ ${t.id}`, worktreeName(cwd), today());
     persist(pm, `pm: task new ${t.id}`);
     const note = epic ? ` (epic ${epic}${all.some((x) => x.data.epic === epic) ? '' : ', new epic'})` : '';
-    return `${t.id} created${note}: ${t.file}`;
+    const hint = taskHint(all, worktreeName(cwd), v);
+    return `${t.id} created${note}: ${t.file}${hint ? `\n${hint}` : ''}`;
   },
 
   set(cwd, [id, ...pairs]) {
@@ -222,6 +259,43 @@ const commands = {
     appendLog(pm, id, { worktree: worktreeName(cwd), did: v.did, next: v.next, date: today() });
     persist(pm, `pm: log ${id}`);
     return `${id} logged`;
+  },
+
+  // A finding the user declined: kept on the task as later#n, listed for /close, resolved there.
+  later(cwd, args) {
+    // By hand, not parseArgs: the text is free and may start with "-" (a pasted "- [ ] …" line).
+    const values = {};
+    const positionals = [];
+    for (let i = 0; i < args.length; i += 1) {
+      const m = args[i].match(/^--(keep|dismiss)(?:=(.*))?$/);
+      if (!m) positionals.push(args[i]);
+      else values[m[1]] = m[2] ?? args[(i += 1)] ?? '';
+    }
+    const [id, ...words] = positionals;
+    const which = values.keep ?? values.dismiss;
+    const bad = which !== undefined && (!which || which.startsWith('-') || !id || words.length);
+    if ((values.keep !== undefined && values.dismiss !== undefined) || bad) {
+      fail('usage: pm later <id> "<text>" | pm later [<id>] | pm later <id> --keep <n,…|all> | --dismiss <n,…|all>');
+    }
+    const pm = requireBoard(cwd);
+    const wt = worktreeName(cwd);
+    const all = listTasks(pm);
+    const task = id && all.find((t) => t.id === id);
+    if (id && !task) fail(`${id} not found — pm ready --all lists tasks`);
+    if (which !== undefined) {
+      const how = values.keep !== undefined ? 'kept' : 'dismissed';
+      const lines = resolveLater(pm, id, attempt(() => pickLater(task, which)), how, wt, today());
+      if (!lines.length) return `(no open later items on ${id})`;
+      persist(pm, `pm: later ${id} ${how}`);
+      return lines.join('\n');
+    }
+    if (words.length) {
+      const n = attempt(() => addLater(pm, id, words.join(' '), wt, today()));
+      persist(pm, `pm: later ${id}`);
+      return `${id} later#${n} recorded`;
+    }
+    const scope = task ? [task] : all.filter((t) => t.data.worktrees.includes(wt));
+    return scope.flatMap((t) => openLater(t).map((i) => `${t.id} later#${i.n}: ${i.text}`)).join('\n') || '(no open later items)';
   },
 
   show(cwd, [id]) {
@@ -324,10 +398,9 @@ const commands = {
     if (!keys.some(Boolean)) return '(no epics)';
     const known = new Set(keys.filter(Boolean));
     return keys.map((e) => {
-      const ts = all.filter((t) => t.data.epic === e && t.data.status !== 'dropped');
-      const open = ts.filter(isOpen).length;
+      const p = epicProgress(all, e);
       const focus = e ? currentFocus(pm, e, known) : '';
-      return `${e || '(none)'} · ${open}/${ts.length} open${e && !open && ts.length ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
+      return `${e || '(none)'} · ${p.open}/${p.total} open${p.open ? ` · ${p.ready} ready` : ''}${e && !p.open && p.total ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
     }).join('\n');
   },
 
@@ -362,10 +435,10 @@ const commands = {
   audit(cwd, args) {
     const fix = parseArgs({ args, options: { fix: { type: 'boolean' } } }).values.fix;
     const pm = requireBoard(cwd);
-    const { findings, fixed } = runAudit({ pm, cwd, fix });
+    const { findings, fixed, stats } = runAudit({ pm, cwd, fix });
     if (fixed.length) writeBoard(pm);
     const lines = [...findings.map(findingLine), ...fixed.map((f) => `fixed: ${f}`)];
-    return lines.join('\n') || 'audit: clean';
+    return [lines.join('\n') || 'audit: clean', stats].filter(Boolean).join('\n');
   },
 
   validate(cwd) {
@@ -450,7 +523,8 @@ Re-run with --yes to proceed.`;
     const { status, line } = markDone({ pm, cwd, id, did: v.did, pr: v.pr, noMerge: Boolean(v['no-merge']), worktree: worktreeName(cwd), date: today() });
     startCapture(pm, cwd); // commits made in another status are never linked later
     persist(pm, `${DONE_PREFIX}${id} → ${status}`);
-    return line;
+    const { epic } = readTask(pm, id).data; // the epic of the task closed, not the worktree's
+    return epic ? `${line}\n${epicLeftLine(listTasks(pm), epic)}` : line;
   },
 
   reconcile(cwd, args) {

@@ -25,7 +25,8 @@ Check every source explicitly, in this order, and name what you found or `—`:
 ## Route each candidate — first match wins
 
 1. **A skill of this session misfired** → propose the fix (the step, the trap, the order) and ask; edit only after the
-   user agrees. A plugin's skill lives in a cache that updates overwrite: tell the user or `pm task new`, never edit it.
+   user agrees. A plugin's skill lives in a cache that updates overwrite: tell the user (a task only with their
+   yes), never edit it.
 2. **Already in the repo, git, CLAUDE.md or a skill** → nothing. It was there and still bit → make it findable
    there (the description, the first line of the section), never a duplicate.
 3. **A fact about the user or their preferences** → auto-memory, as usual.
@@ -35,7 +36,9 @@ Check every source explicitly, in this order, and name what you found or `—`:
 5. **A project lesson — symptom, fix, how to apply** → `pm learn find <word>` first (the pattern of an existing
    one wins), then `pm learn add --title "<symptom as the next agent will see it>" --pattern area.symptom
    --symptom "…" --fix "…" --apply "…" --tasks <ids>`. The CLI counts a known pattern instead of a new file.
-6. **A code defect across the repo** (the same pattern in N files) → `pm task new`, not memory.
+6. **A code defect across the repo** (the same pattern in N files) → not memory. It is
+   outside the task, so the triage of `/pm`: fix now (ask first) or offer a separate session — `pm task new`
+   only with the user's yes.
 
 ## Never record
 

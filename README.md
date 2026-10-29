@@ -68,7 +68,8 @@ turn that off with `git config --global pm.updateCheckNetwork false`; the local 
    Claude creates the board (`pm init`), fills `PLAN.md` and imports existing plans. You can also say
    "create a board".
 2. Ask **"break it down"**. Claude creates tasks with order and dependencies, and links a detailed plan.
-3. Ask **"what's next?"**. Claude claims the first ready task and writes down how it understands it.
+3. Ask **"what's next?"**: Claude offers the choices (`pm next --options`) — the task in progress, the queue,
+   another epic. **"take the next one"** claims the first ready task and writes down how it understands it.
 4. Work as usual. When you stop, say **/close**: Claude closes or logs every task with the exact next step,
    records what the session taught, and picks the task the next session starts with.
    ("we're done" on its own only logs the next steps.)
@@ -113,6 +114,7 @@ If PowerShell refuses to load the profile, allow it once with `Set-ExecutionPoli
 | "what's next?" | `pm next --options`, then asks what to take: the task in progress, a task of the queue, another epic, or your own work — each with a line about it |
 | "take the next one" | `pm next`: claims the first ready task of this worktree's direction, writes `## Understanding` first |
 | "break it down" | Creates tasks with `--order`, `--deps`, `--epic`; puts detail in a plan file and links it |
+| "not now" about a finding Claude offered to fix | `pm later`: kept on the current task as `later#n`, no new task; `/close` asks about all of them once — see [Found something outside the task](#found-something-outside-the-task) |
 | "remember …" | Puts it in exactly one place: a decision, auto-memory, or the task's `## Understanding` |
 | "waiting for …" | `status=waiting` with the reason; the task leaves Ready |
 | "we're done", "continue in a new session" | Logs `did` / `next` on every active task of this worktree, updates focus |
@@ -152,6 +154,7 @@ Every turn that changed the board ends with one line in your language, such as
 [pm] my-app · epic APP-12 · focus: import pipeline, parser done · board: file:///…/pm/board.html
 Your worktree (feature-csv):
   T-003 CSV import [in_progress] → next: handle empty rows (2026-09-12, feature-csv)
+Epic APP-12: 4 left of 6 (2 ready, 1 in progress, 1 waiting)
 Elsewhere: T-008 Export to XLSX @ feature-export
 Ready: T-004 validation ← next · T-006 export · +2 in other epics (pm ready --all)
 Waiting: T-005 ← answer about date format
@@ -168,6 +171,7 @@ Rules: …
 |---|---|
 | header | project, this worktree's epic, its focus line from `PLAN.md`, link to the board |
 | Your worktree | open tasks claimed here, with the last logged next step |
+| Epic | how much of this worktree's epic is left: `3 left of 6 (1 ready, 1 in progress, 1 waiting)`; with nothing open, `no open tracked tasks (6 done)` — Claude asks which direction is next instead of inventing tasks. Never cut by the 40-line cap |
 | Elsewhere | tasks in progress in other worktrees — do not take them |
 | Ready | `todo` tasks whose dependencies are all done, for this worktree's epic. The task chosen by `/close` comes first, marked `← next` (`← next (after PM-009)` while its dependencies are open) |
 | Waiting | tasks blocked on something outside the board, and what |
@@ -205,7 +209,11 @@ pm task new --title "Parser" --epic APP-12 --links docs/plans/csv-import.md
   whose tasks were all dropped just disappears. There is nothing to archive by hand.
 - **Done stays short.** On a board with epics the Done column keeps the latest 5 tasks closed in the last
   20 days; older done cards go to the `Done earlier` group of `Archive`.
-- `pm epics` lists every direction with open/total and its focus line.
+- **Progress is said out loud.** The summary's `Epic APP-12:` line counts what is left; `pm done` and
+  `pm reconcile` add one line for the epic of the task they closed (`epic APP-12: 2 left (1 ready, 1 in
+  review)`, or `that was the last open task` with a reminder to update its focus line); `pm next` says why
+  nothing is ready (`2 open, none ready (1 waiting, 1 in progress)`).
+- `pm epics` lists every direction with open/total, the ready count and its focus line.
 
 Boards without epics behave exactly as they did before epics existed.
 
@@ -232,6 +240,39 @@ Typical shapes:
 | A one-session fix, a review, a question | nothing; answer the Stop reminder "nothing to track" |
 
 If a small fix spills into a second session, file the task then. It is cheaper than filing ahead.
+
+### Found something outside the task
+
+Mid-work an agent finds things: a bug next door, a one-line fix, a follow-up, a "remove this flag after the
+release". Filing each as a task makes a pile nobody reaches. The default is **no task**:
+
+1. **In this task's area and fits this session** → Claude asks one line: "Fix now? <what it touches, how it
+   changes this PR>". Yes → fixed in this task and noted in its Log. No → `pm later T-NNN "<text>"`.
+2. **Unrelated to the current work** → Claude offers a separate session started now: a paragraph you paste into
+   a new session or worktree. Declined → `pm later`.
+3. **A wait tied to an event** (release, merge, someone's answer) → the task's own status, never a second task.
+4. **A task** only when you say so, or for planned work that will not fit this session: `pm task new … --from
+   T-NNN` (`--from` records where it came from; a dependency is `--deps`).
+
+Several findings at once come as one question.
+
+| Case | Where it goes |
+|---|---|
+| A wait inside this task | `waiting` with `waiting_on`, or `review` with its PR |
+| A declined finding | `later#n` on the current task (`pm later`); `/close` asks once: keep, make a task, dismiss |
+| Planned work for another session | `pm task new … --from T-NNN` |
+
+```
+$ pm later T-012 "the date picker drops the time zone"
+T-012 later#1 recorded
+$ pm later                                   # at /close: this worktree's open items
+T-012 later#1: the date picker drops the time zone
+$ pm task new --title "time zone in the date picker" --from T-012 --later 1
+T-019 created: …
+```
+
+`pm task new` never refuses, but it prints one `hint:` line when the title reads like a reminder, or when this
+worktree already has a task in progress and neither `--from` nor `--deps` says the new one was meant.
 
 ## Closing a session
 
@@ -268,8 +309,9 @@ T-041 → review: #15 not merged yet; closes by itself after the merge (git conf
 ```
 
 A task expects a merge when it has a `pr` or linked commits. `--pr <url>` stores the PR first,
-`--no-merge` closes it now. If anything is unfinished, Claude says what, files leftovers as tasks and
-logs the exact next step instead.
+`--no-merge` closes it now. If anything of the task is unfinished, Claude says what, logs the exact next step
+and keeps it open; something found outside the task goes through the triage (see
+[Found something outside the task](#found-something-outside-the-task)), not into new tasks.
 
 A `review` task closes by itself once its own merge is seen: at a later session start, or at once with
 `pm reconcile`. A merge is seen in two ways:
@@ -406,6 +448,11 @@ session state files older than 7 days. It prints what it changed and commits `pm
 changes a status and never deletes a task, a learning or a decision. Everything else is a question for you,
 answered with the command the line names.
 
+After the findings `pm audit` prints a `stats` line — whether tasks still pile up:
+`stats (30 days): 12 tasks created · 3 dropped without a did: line · 2 empty 14+ days` (tasks created in the
+last 30 days, how many were dropped before any work was logged, how many are still only a title 14+ days
+later). A board whose tasks have no `created` date yet prints nothing.
+
 At session start, once every 7 days, the summary adds `[pm] audit: N findings — run: pm audit` when the
 count is above zero. That count never fixes anything.
 
@@ -414,16 +461,17 @@ count is above zero. That count never fixes anything.
 | Command | What it does |
 |---|---|
 | `pm init` | Create the board for this repository |
-| `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b]` | Create a task. Without `--epic` it inherits this worktree's epic |
+| `pm task new --title T [--order N] [--deps T-001,T-002] [--milestone M] [--epic KEY] [--links a,b] [--from T-012 [--later N]]` | Create a task. Without `--epic` it inherits this worktree's epic. Records `created`; `--from` records where it came from (not a dependency), `--later N` also resolves that task's `later#N`. May print one `hint:` line, never refuses |
+| `pm later T-012 "<text>"` · `pm later [T-012]` · `pm later T-012 --keep\|--dismiss <n,…\|all>` | A finding the user declined, kept on the task as `later#n`; list the open ones (this worktree's tasks by default); resolve them |
 | `pm set T-003 key=value …` | Change fields: `status`, `order`, `depends_on`, `waiting_on`, `milestone`, `epic`, `links`, `title`, `pr` (the MR/PR URL `pm show` reads) |
 | `pm claim T-003` | Attach this worktree to the task and set `in_progress` (a `review` task stays `review`) |
 | `pm log T-003 --did "…" --next "…"` | Append a work log entry |
 | `pm done T-003 [--did "…"] [--pr url \| --no-merge]` | Finished and verified: `done`, or `review` until its merge closes it. Prints the outcome and why |
 | `pm reconcile [--yes [ids]] [--no-fetch]` | Find merged tasks now: closes `review` ones, lists the rest (`--yes T-001,T-004` closes those, a bare `--yes` all of them), PR conflicts, tasks awaiting merge 7+ days, tasks it could not check |
-| `pm show T-003` | What the task file does not say: branch, MR/PR state, timeline, commits, decisions, dependents, and the `undo:` block — the exact `git revert` / `git switch -c before/…` commands and their risks. Read-only |
+| `pm show T-003` | What the task file does not say: `created` / `from`, branch, MR/PR state, timeline, commits, decisions, dependents, tasks spawned from it, and the `undo:` block — the exact `git revert` / `git switch -c before/…` commands and their risks. Read-only |
 | `pm decision --title T --why W --rejected R [--tasks T-001]` | Record a decision |
 | `pm ready [--epic KEY \| --all]` | Ready tasks of this worktree's epic, of one epic, or all. Without an epic of its own the worktree gets all, tagged |
-| `pm epics` | Every epic: open/total and its focus line |
+| `pm epics` | Every epic: open/total, ready count and its focus line |
 | `pm prefix [KEY] [--start N]` | Show or set the task id prefix, e.g. `PM` → `PM-051`, for branches like `feat/PM-051/slug`. `--start N`: new ids continue from N. Stored in the board (`config.json`), so synced machines share it. Existing tasks keep their ids; the number continues |
 | `pm next [--epic KEY]` | Take the head of the ready queue and claim it: the task marked next first, then by order. Stays in this worktree's epic; a worktree without one takes only repo-wide tasks unless `--epic` names one. Refuses while a task is in progress here |
 | `pm next --options [--epic KEY]` | The choices for "what's next?", one line each: `current` (in progress here), `task` (the queue, with its goal or last logged next step), `epic` (other epics with something ready, their first task and focus). Claims nothing |
@@ -451,7 +499,7 @@ Statuses: `todo`, `in_progress`, `waiting` (needs `waiting_on`), `review` (await
 |---|---|
 | **SessionStart** (startup, resume, clear, compact) | With sync on: commit, pull, check the memory link. Close `review` tasks whose merge is already known (local refs and the merge cache, no network); start a background merge check when the cache is older than 30 minutes. Redraw the board, validate it, print the summary. Once every 7 days it also counts audit findings and prints `[pm] audit: N findings` when there are any; it never fixes anything |
 | **PostToolUse** (Write, Edit, MultiEdit, ExitPlanMode) | A file inside the board changed → redraw the views. A plan file was written → ask Claude to reconcile the board with it |
-| **Stop** | Commit the board. If code changed but neither this worktree's tasks nor `PLAN.md` / `decisions.md` were touched for 20 minutes → ask Claude to log progress (at most once per 20 minutes) |
+| **Stop** | Commit the board. If **this session** made commits (its own reflog: commit, amend, cherry-pick, revert — not pulls, merges or rebases) or changed files after the later of its start and the last manual update of this worktree's tasks, `PLAN.md` or `decisions.md`, and that update is 20+ minutes old → ask Claude to log progress, saying what it saw (at most once per 20 minutes). It never asks to create a task. `PM_DEBUG=1` prints what it saw to stderr |
 | **PreCompact**, **SessionEnd** | Append an automatic note (changed files, last commit) to this worktree's in-progress tasks and commit |
 
 Plan files that trigger the reconcile nudge: `docs/superpowers/plans/`, `docs/superpowers/specs/`,
@@ -547,7 +595,7 @@ merges the listed markdown files keeping both sides, and syncs again. Nothing is
 | `[pm] this repo has a shared board …` | Sync is on elsewhere. Say "connect the board" |
 | Changes to the plugin do not show up | Fully restart Claude Code. Check `~/.claude/plugins/installed_plugins.json` for the version |
 | Summary shows `focus: —` | This worktree has no epic yet, or `PLAN.md` has no line for it |
-| Stop keeps asking to update the board | Log progress, claim a task, or answer "nothing to track" |
+| Stop keeps asking to update the board | Log progress on the task (`pm log`), or answer "nothing to track"; `PM_DEBUG=1` shows what Stop counted |
 | `[pm] board problems: …` | Run `pm validate` and fix the listed tasks |
 | A wrong board change | Say "undo that", or revert it with git in the board directory |
 | Code of a task has to go | Say "undo the code of T-007": you get the exact commands and the risks before anything runs |

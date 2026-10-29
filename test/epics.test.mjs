@@ -24,7 +24,7 @@ test('epic is a plain scalar field: empty by default, unquoted, trimmed on read'
   const pm = tmp();
   newTask(pm, { title: 'plain', date: D });
   newTask(pm, { title: 'tagged', epic: 'ATS-1224', date: D });
-  assert.match(fs.readFileSync(`${pm}/tasks/T-001.md`, 'utf8'), /\nupdated: 2026-09-14\nepic: ""\n---\n/, 'last field, like a migrated file');
+  assert.match(fs.readFileSync(`${pm}/tasks/T-001.md`, 'utf8'), /\nupdated: 2026-09-14\nepic: ""\ncreated: 2026-09-14\n---\n/, 'after updated, like a migrated file; created comes last');
   assert.match(fs.readFileSync(`${pm}/tasks/T-002.md`, 'utf8'), /\nepic: ATS-1224\n/);
   setFields(pm, 'T-001', { epic: 'ATS-1224 ' }, D);
   assert.deepEqual(listTasks(pm).map((t) => t.data.epic), ['ATS-1224', 'ATS-1224']);
@@ -254,7 +254,7 @@ test('cli: --epic on task new, ready narrowed to the worktree epic, pm epics', (
   cli(['set', 'T-002', 'status=done'], root);
   cli(['task', 'new', '--title', 'a3', '--deps', 'T-002'], root);
   assert.equal(cli(['ready'], root).out, '# epic A · pm ready --all for every direction\nT-003 shared\nT-004 a2\nT-005 wide\nT-006 a3', 'T-006 depends on a done task of B');
-  assert.equal(cli(['epics'], root).out, 'A · 3/3 open\nB · 0/1 open · closed\n(none) · 2/2 open');
+  assert.equal(cli(['epics'], root).out, 'A · 3/3 open · 2 ready\nB · 0/1 open · closed\n(none) · 2/2 open · 2 ready');
   assert.match(cli(['summary'], root).out, /^\[pm\] [^\n]* · epic A · focus: — · board: /);
 });
 
