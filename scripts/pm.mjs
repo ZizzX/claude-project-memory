@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn, withLock } from './lib/store.mjs';
-import { listTasks, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext } from './lib/tasks.mjs';
+import { listTasks, readTask, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext, epicProgress, epicNothingReady, epicLeftLine } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -122,7 +122,9 @@ function takeNext(pm, cwd, epicArg) {
     const { epic, ready, queue: [t] } = nextQueue(all, cwd, epicArg);
     if (!t) {
       if (!epic && ready.length) fail('no epic for this worktree and no repo-wide task ready — pm next --epic KEY, or pm claim <id>');
-      fail(`nothing ready${epic ? ` in epic ${epic}` : ''}`);
+      if (!epic) fail('nothing ready');
+      const p = epicProgress(all, epic);
+      fail(`nothing ready in epic ${epic} — ${epicNothingReady(p)} — pm next --options shows other epics${p.open ? '' : `, or pm task new --epic ${epic}`}`);
     }
     return `${t.id} claimed by ${claimHere(pm, cwd, t.id)}: ${t.data.title}`;
   });
@@ -155,7 +157,8 @@ function nextOptions(pm, cwd, epicArg) {
   });
   const head = epic ? `# epic ${epic}` : known.size ? '# no epic for this worktree — a task of another epic starts that direction here' : '#';
   const body = [...current, ...tasks, ...epics];
-  return [`${head} · pick one, or say what to work on`, ...(body.length ? body : ['(nothing ready)'])].join('\n');
+  const none = `(nothing ready)${epic ? ` — epic ${epic}: ${epicNothingReady(epicProgress(all, epic))}` : ''}`;
+  return [`${head} · pick one, or say what to work on`, ...(body.length ? body : [none])].join('\n');
 }
 
 const conflictHelp = (pm) => `sync conflict in: ${(conflictFiles(pm) ?? []).join(', ') || 'unknown files'}
@@ -327,7 +330,8 @@ const commands = {
       const ts = all.filter((t) => t.data.epic === e && t.data.status !== 'dropped');
       const open = ts.filter(isOpen).length;
       const focus = e ? currentFocus(pm, e, known) : '';
-      return `${e || '(none)'} · ${open}/${ts.length} open${e && !open && ts.length ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
+      const ready = open ? ` · ${epicProgress(all, e).ready} ready` : '';
+      return `${e || '(none)'} · ${open}/${ts.length} open${ready}${e && !open && ts.length ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
     }).join('\n');
   },
 
@@ -450,7 +454,8 @@ Re-run with --yes to proceed.`;
     const { status, line } = markDone({ pm, cwd, id, did: v.did, pr: v.pr, noMerge: Boolean(v['no-merge']), worktree: worktreeName(cwd), date: today() });
     startCapture(pm, cwd); // commits made in another status are never linked later
     persist(pm, `${DONE_PREFIX}${id} → ${status}`);
-    return line;
+    const { epic } = readTask(pm, id).data; // the epic of the task closed, not the worktree's
+    return epic ? `${line}\n${epicLeftLine(listTasks(pm), epic)}` : line;
   },
 
   reconcile(cwd, args) {

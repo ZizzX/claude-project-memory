@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { tryGit } from './paths.mjs';
 import { readState, writeState } from './store.mjs';
 import { defaultBranch, isDefaultIn, prLookup, parsePrUrl } from './forge.mjs';
-import { listTasks, readTask, writeTask, setFields, appendLog } from './tasks.mjs';
+import { listTasks, readTask, writeTask, setFields, appendLog, epicLeftLine } from './tasks.mjs';
 import { captureCommits } from './gitlink.mjs';
 
 const PM_SCRIPT = fileURLToPath(new URL('../pm.mjs', import.meta.url));
@@ -333,6 +333,12 @@ export function reconcile({ pm, cwd, yes = false, fetch = true, date, now = Date
   const closed = [...(auto ?? []), ...(confirmed ?? [])];
   const label = (x) => `${x.id} (${mergeLabel(x, local.branch)})`;
   if (closed.length) lines.push(`Closed: ${closed.map(label).join(', ')}`);
+  // Counted once after the whole batch: two tasks of one epic closed together give one line.
+  const epics = [...new Set(closed.map((c) => tasks.find((t) => t.id === c.id)?.data.epic).filter(Boolean))];
+  if (epics.length) {
+    const after = listTasks(pm);
+    lines.push(...epics.map((e) => epicLeftLine(after, e)));
+  }
   if (Array.isArray(yes)) {
     const unknown = yes.filter((id) => !out.ask.some((a) => a.id === id));
     if (unknown.length) lines.push(problem(`Not closed: ${unknown.join(', ')}`, 'no merge of these open tasks was found', 'pm reconcile to see the list'));

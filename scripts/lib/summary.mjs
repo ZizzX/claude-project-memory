@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { listTasks, readyQueue, lastNext, isOpen, byEpic, activeEpic, nextTask } from './tasks.mjs';
+import { listTasks, readyQueue, lastNext, isOpen, byEpic, activeEpic, nextTask, epicProgress, epicParts, epicClosed } from './tasks.mjs';
 import { recentDecisions } from './decisions.mjs';
 import { projectName, currentFocus } from './plan.mjs';
 import { parsePrUrl } from './forge.mjs';
@@ -66,6 +66,14 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
     const n = lastNext(t);
     lines.push(`  ${t.id} ${t.data.title}${tag(t, epic)} [${t.data.status}]${n ? ` → next: ${n.next} (${n.date}, ${n.who})` : ''}`);
   }
+  // The header and the epic line survive the cap: they say which direction this is and how much of it is left.
+  const kept = new Set([0]);
+  if (epic) {
+    const p = epicProgress(tasks, epic);
+    kept.add(lines.push(p.open
+      ? `Epic ${epic}: ${p.open} left of ${p.total} (${epicParts(p)})`
+      : `Epic ${epic}: no open tracked tasks (${epicClosed(p)}) — ask the user which direction is next: pm next --options`) - 1);
+  }
   if (elsewhere.length) lines.push(`Elsewhere: ${elsewhere.map((t) => `${t.id} ${t.data.title} @ ${t.data.worktrees.join(', ') || '(no worktree)'}`).join(' · ')}`);
   lines.push(`Ready: ${ready.map((t) => `${t.id} ${t.data.title}${tag(t, epic)}${nextTag(t, tasks)}`).join(' · ') || '—'}${others ? ` · +${others} in other epics (pm ready --all)` : ''}`);
   if (waiting.length) lines.push(`Waiting: ${waiting.map((t) => `${t.id}${tag(t, epic)} ← ${t.data.waiting_on}`).join(' · ')}`);
@@ -90,8 +98,16 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   const tail = [`CLI: node "${scriptPath}" <command>`, ...RULES];
   const room = MAX_LINES - tail.length;
   if (lines.length > room) {
+    // Lines go from the end, the kept ones stay; the note takes the place of the earliest line removed.
     const cut = lines.length - room + 1;
-    lines.splice(room - 1, cut, `  … ${cut} more lines — see BOARD.md`);
+    let at = lines.length;
+    for (let i = lines.length - 1, left = cut; i >= 0 && left; i -= 1) {
+      if (kept.has(i)) continue;
+      lines.splice(i, 1);
+      at = i;
+      left -= 1;
+    }
+    lines.splice(at, 0, `  … ${cut} more lines — see BOARD.md`);
   }
   return [...lines, ...tail].join('\n');
 }

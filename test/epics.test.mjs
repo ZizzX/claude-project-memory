@@ -254,7 +254,7 @@ test('cli: --epic on task new, ready narrowed to the worktree epic, pm epics', (
   cli(['set', 'T-002', 'status=done'], root);
   cli(['task', 'new', '--title', 'a3', '--deps', 'T-002'], root);
   assert.equal(cli(['ready'], root).out, '# epic A · pm ready --all for every direction\nT-003 shared\nT-004 a2\nT-005 wide\nT-006 a3', 'T-006 depends on a done task of B');
-  assert.equal(cli(['epics'], root).out, 'A · 3/3 open\nB · 0/1 open · closed\n(none) · 2/2 open');
+  assert.equal(cli(['epics'], root).out, 'A · 3/3 open · 2 ready\nB · 0/1 open · closed\n(none) · 2/2 open · 2 ready');
   assert.match(cli(['summary'], root).out, /^\[pm\] [^\n]* · epic A · focus: — · board: /);
 });
 

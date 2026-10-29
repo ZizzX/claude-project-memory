@@ -255,6 +255,41 @@ export function activeEpic(tasks, worktree) {
   return found.size === 1 ? [...found][0] : '';
 }
 
+// One epic's tasks by state (its own key only, repo-wide tasks are not part of it). The printed parts — ready,
+// blocked, in progress, waiting, in review — sum to open; total leaves dropped tasks out.
+export function epicProgress(tasks, epic) {
+  const status = new Map(tasks.map((t) => [t.id, t.data.status]));
+  const met = (t) => t.data.depends_on.every((d) => ['done', 'dropped'].includes(status.get(d)));
+  const own = tasks.filter((t) => t.data.epic === epic);
+  const count = (fn) => own.filter(fn).length;
+  const is = (s) => (t) => t.data.status === s;
+  return {
+    open: count(isOpen),
+    ready: count((t) => is('todo')(t) && met(t)),
+    blocked: count((t) => is('todo')(t) && !met(t)),
+    inProgress: count(is('in_progress')),
+    waiting: count(is('waiting')),
+    review: count(is('review')),
+    done: count(is('done')),
+    dropped: count(is('dropped')),
+    total: count((t) => !is('dropped')(t)),
+  };
+}
+
+const PARTS = [['ready', 'ready'], ['blocked', 'blocked'], ['inProgress', 'in progress'], ['waiting', 'waiting'], ['review', 'in review']];
+export const epicParts = (p) => PARTS.filter(([k]) => p[k]).map(([k, label]) => `${p[k]} ${label}`).join(', ');
+// How an epic without open tasks ended: its done count, or its dropped count when nothing was done.
+export const epicClosed = (p) => (p.done || !p.dropped ? `${p.done} done` : `${p.dropped} dropped`);
+// Why an epic has nothing ready: what is still open, or that nothing is.
+export const epicNothingReady = (p) => (p.open ? `${p.open} open, none ready (${epicParts(p)})` : `no open tracked tasks (${epicClosed(p)})`);
+
+// pm done and pm reconcile, after closing: what is left of the epic, or that its last open task just closed.
+export function epicLeftLine(tasks, epic) {
+  const p = epicProgress(tasks, epic);
+  if (p.open) return `epic ${epic}: ${p.open} left (${epicParts(p)})`;
+  return `epic ${epic}: that was the last open task — no open tracked tasks. Update or remove its focus line in PLAN.md; /close asks which direction is next.`;
+}
+
 export function readyQueue(tasks) {
   const status = new Map(tasks.map((t) => [t.id, t.data.status]));
   return tasks
