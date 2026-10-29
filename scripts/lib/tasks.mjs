@@ -203,14 +203,16 @@ export function claim(pm, id, worktree, date, branch = '') {
 }
 
 // Free text that goes into a task file as one line: no newline, no list or heading marker in front that would
-// read as a checklist item, a front matter fence or a section, at most `max` characters.
+// read as a checklist item, a front matter fence or a section, no ` · ` that would read as a Log field (did:,
+// next:), at most `max` characters (not UTF-16 units: an emoji is never cut in half).
 export function cleanLine(text, max = 200) {
-  let s = String(text ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim();
+  let s = String(text ?? '').replace(/\s*[\r\n]+\s*/g, ' ').replace(/\s*·\s*/g, ' - ').trim();
   for (let prev; prev !== s;) {
     prev = s;
     s = s.replace(/^(?:- \[[ xX]\]|-{3,}|#+)\s*/, '');
   }
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  const chars = [...s];
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : s;
 }
 
 // Log is the last section of a task file, so entries are appended at the end of the body.

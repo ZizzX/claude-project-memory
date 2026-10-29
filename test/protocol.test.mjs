@@ -54,3 +54,11 @@ test('pm help shows pm later and pm task new --from, each with an example', () =
   assert.match(help, /--from <id>.*not a dependency/);
   assert.match(help, /e\.g\. pm task new --title "[^"]+" --from T-012/);
 });
+
+test('a hint never makes the agent drop a task on its own; /close creates tasks before resolving the rest', () => {
+  const skill = read('skills/pm/SKILL.md');
+  assert.doesNotMatch(skill, /drop the task unless/);
+  assert.match(skill, /`hint:` line[^|]*ask the user/);
+  const close = read('commands/close.md');
+  assert.ok(close.indexOf('--from <id> --later <n>') < close.indexOf('--keep'), 'tasks first, then keep/dismiss the rest');
+});

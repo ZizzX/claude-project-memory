@@ -37,6 +37,17 @@ const WORK = [
   'Retry the upload after a network error',
   'Waiting spinner on the upload button',
   'Reminder emails for candidates',
+  'Написать бэкенд-эндпоинт экспорта',
+  'Написать фронт для отчёта',
+  'После продажи показывать чек',
+  'Ping backend health endpoint every 30s',
+  'Notify team on deploy failure',
+  'Show banner after product tour',
+  'Remove MAX_RETRIES constant',
+  'Delete user flags column',
+  'Implement wait for element helper',
+  'Disable button after merge conflict',
+  'Remind password flow',
 ];
 
 test('isReminderTitle: reminder wording in Russian and English', () => {

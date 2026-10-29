@@ -3,7 +3,7 @@ import { readTask, appendLogLine, cleanLine } from './tasks.mjs';
 // A finding the user declined to fix now, kept on the task it came up in instead of becoming a task of its own:
 // "- <date> · <worktree> · later#<n>: <text>". A later Log line resolves it: "later#<n> kept", "later#<n> dismissed"
 // or "later#<n> → T-NNN". /close asks once about the unresolved ones.
-const LINE = /^- \S+ · .+? · later#(\d+)(?:: (.*)| (kept|dismissed|→ \S+))$/;
+const LINE = /^- \S+ · [^·]+ · later#(\d+)(?:: (.*)| (kept|dismissed|→ \S+))$/; // the worktree holds no ·: a did/next text never matches
 
 export function laterItems(task) {
   const items = new Map();

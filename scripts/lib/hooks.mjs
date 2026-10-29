@@ -38,21 +38,38 @@ function ancestorMtime(top, rel) {
   }
 }
 
-function dirtyFilesSince(cwd, since) {
+// `git status` paths: { kind, rel, source } — source is the old path of a rename or copy.
+function statusPaths(cwd) {
   const top = tryGit(['rev-parse', '--show-toplevel'], cwd);
   const entries = (tryGit(['status', '--porcelain', '-z'], cwd) ?? '').split('\0').filter(Boolean);
-  const files = [];
+  const paths = [];
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i];
-    if (entry[0] === 'R' || entry[0] === 'C') i += 1; // next entry is the rename/copy source
-    const rel = entry.slice(3);
-    try {
-      if (fs.statSync(path.join(top, rel)).mtimeMs > since) files.push(rel);
-    } catch {
-      if (ancestorMtime(top, rel) > since) files.push(rel);
-    }
+    const source = entry[0] === 'R' || entry[0] === 'C' ? entries[(i += 1)] : null; // next entry is the source
+    paths.push({ kind: entry[0], rel: entry.slice(3), source });
   }
-  return files;
+  return { top, paths };
+}
+
+// Paths already gone when a session window opens: their deletion belongs to an earlier session.
+function deletedPaths(cwd) {
+  const { top, paths } = statusPaths(cwd);
+  return paths.flatMap((p) => [p.rel, p.source]).filter((rel) => rel && !fs.existsSync(path.join(top, rel)));
+}
+
+// A dirty path changed after `since`: its mtime, or — deleted, or the old side of a rename (git mv keeps the
+// mtime) — its nearest directory, unless it was already gone when the window opened.
+function dirtyFilesSince(cwd, since, deletedBefore = []) {
+  const { top, paths } = statusPaths(cwd);
+  const gone = new Set(deletedBefore);
+  const changed = (rel) => {
+    try {
+      return fs.statSync(path.join(top, rel)).mtimeMs > since;
+    } catch {
+      return !gone.has(rel) && ancestorMtime(top, rel) > since;
+    }
+  };
+  return paths.filter((p) => changed(p.rel) || (p.kind === 'R' && changed(p.source))).map((p) => p.rel);
 }
 
 function committedSince(cwd, head) {
@@ -69,10 +86,11 @@ function lastBoardUpdate(pm, worktree, tasks) {
   return Math.max(0, ...files.filter((f) => fs.existsSync(f)).map((f) => manualMtime(pm, f)));
 }
 
-// What a session window starts from: its time, HEAD for the note's file list, the reflog size for Stop's commits.
+// What a session window starts from: its time, HEAD for the note's file list, the reflog size for Stop's commits,
+// and the paths already deleted, so an old deletion is never counted as this session's change.
 function sessionState(cwd) {
   const file = reflogFile(cwd);
-  return { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd), reflogOffset: file ? sizeOf(file) : null };
+  return { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd), reflogOffset: file ? sizeOf(file) : null, deleted: deletedPaths(cwd) };
 }
 
 // Commits made in this worktree after the session window opened, read from its own reflog offset: pulls,
@@ -166,9 +184,14 @@ export function onStop(input, cwd, now = Date.now()) {
   // by hand, and this repeated Stop is the only place that commits it.
   persist(pm, 'pm: stop', tasks);
   if (input.stop_hook_active) return '';
-  // Without its session's state there is no window to compare with: some other run, or a plugin reload.
+  // Without a session_id there is no window to key: some other run, or a plugin reload. A session whose start
+  // left no state (SessionStart timed out, or the board was created mid-session) opens its window now.
+  if (!input.session_id) return debug('no block — no session_id');
   const session = `session-${input.session_id}`;
-  if (!input.session_id || !hasState(pm, session)) return debug('no block — no session state');
+  if (!hasState(pm, session)) {
+    writeState(pm, session, sessionState(cwd));
+    return debug('no block — no session state yet, the window starts now');
+  }
   const worktree = worktreeName(cwd);
   const updated = lastBoardUpdate(pm, worktree, tasks);
   const stateName = `stop-${worktree}`;
@@ -179,7 +202,7 @@ export function onStop(input, cwd, now = Date.now()) {
   const state = readState(pm, session);
   const since = Math.max(state.start ?? 0, updated);
   const commits = sessionCommits(cwd, state, since);
-  const files = dirtyFilesSince(cwd, since);
+  const files = dirtyFilesSince(cwd, since, state.deleted);
   const saw = `since ${new Date(since).toISOString()}: ${commits} commits, ${files.length} files${files.length ? ` (${files.slice(0, 10).join(', ')})` : ''}`;
   if (!commits && !files.length) return debug(`no block — ${saw}`);
   debug(`block — ${saw}`);
@@ -201,9 +224,9 @@ export function onSafetyNote(input, cwd, event) {
     return '';
   }
   const stateName = `session-${input.session_id}`;
-  const { start = Date.now(), head = null } = readState(pm, stateName);
+  const { start = Date.now(), head = null, deleted = [] } = readState(pm, stateName);
   const worktree = worktreeName(cwd);
-  const files = [...new Set([...committedSince(cwd, head), ...dirtyFilesSince(cwd, start)])];
+  const files = [...new Set([...committedSince(cwd, head), ...dirtyFilesSince(cwd, start, deleted)])];
   if (files.length) {
     const shown = files.slice(0, 10).join(', ') + (files.length > 10 ? ` (+${files.length - 10} more)` : '');
     const last = tryGit(['log', '-1', '--format=%h %s'], cwd) ?? 'none';

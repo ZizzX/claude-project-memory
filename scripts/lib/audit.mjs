@@ -20,11 +20,9 @@ function liveWorktrees(cwd) {
   return new Set(out.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => path.basename(l.slice('worktree '.length).trim())));
 }
 
-const section = (task, name) => task.body.match(new RegExp(`^## ${name}\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'))?.[1].trim() ?? '';
-
-// Only a title: an open todo whose sections are all empty, untouched and created 14+ days ago.
+// Only a title: an open todo with no text besides the template headings, untouched and created 14+ days ago.
 export const isEmptyTask = (t, now) => t.data.status === 'todo'
-  && ['Goal', 'Understanding', 'Checklist', 'Log'].every((name) => !section(t, name))
+  && !t.body.replace(/^## (?:Goal|Understanding|Checklist|Log)[ \t]*$/gm, '').trim()
   && olderThan(t.data.updated, DAYS.empty, now) && (!t.data.created || olderThan(t.data.created, DAYS.empty, now));
 
 // Whether tasks stopped piling up: of those created in the last 30 days, how many were dropped before any work was

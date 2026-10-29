@@ -56,3 +56,23 @@ test('pm later errors say what, why and the next command', () => {
   assert.equal(cli(['later', 'T-001', '--keep', '9'], root).err, 'later#9 is not open on T-001 — open: 1 — pm later T-001 lists them');
   assert.equal(cli(['later', 'T-001', '--keep', '1', '--dismiss', '1'], root).code, 1);
 });
+
+test('pm later: a later# text inside a did/next line is not an item; its own text cannot fake Log fields', () => {
+  const { root, file } = board();
+  cli(['log', 'T-001', '--did', 'a', '--next', 'x · later#1: recheck'], root);
+  assert.equal(cli(['later'], root).out, '(no open later items)');
+  assert.equal(cli(['later', 'T-001', 'fix X · next: bar · did: y'], root).out, 'T-001 later#1 recorded');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.match(text, / · later#1: fix X - next: bar - did: y$/m);
+  assert.match(cli(['summary'], root).out, /T-001 a \[in_progress\] → next: x · later#1: recheck /, 'the next step is still the logged one');
+});
+
+test('pm later --keep / --dismiss without a value is a usage error; nothing open says so', () => {
+  const { root } = board();
+  for (const args of [['--keep'], ['--keep', '--dismiss', '1'], ['--dismiss', '']]) {
+    const r = cli(['later', 'T-001', ...args], root);
+    assert.equal(r.code, 1, args.join(' '));
+    assert.match(r.err, /^usage: pm later /, args.join(' '));
+  }
+  assert.equal(cli(['later', 'T-001', '--dismiss', 'all'], root).out, '(no open later items on T-001)');
+});

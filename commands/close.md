@@ -19,8 +19,8 @@ CLI call. Never skip a step silently — say what you skipped and why.
      `pm log` only when the work continues in another session.
    - Then the declined findings: `pm later` lists the open `later#n` items of this worktree's tasks. None →
      say nothing. Otherwise ask one question over all of them: keep all (default) / pick numbers to turn into
-     tasks / dismiss all → `pm later <id> --keep all`, `pm task new --title "…" --from <id> --later <n>` for
-     each picked one, `pm later <id> --dismiss …`.
+     tasks / dismiss all. Picked ones first: `pm task new --title "…" --from <id> --later <n>` each; then the
+     rest: `pm later <id> --keep all` or `pm later <id> --dismiss all`.
 2. **Retro.** Invoke the `retro` skill of this plugin. It ends with `pm learn add … --tasks <ids>` for each
    lesson, and `pm learn none <id>` for every id from step 1 that no `learn add` named (a lesson that went to a
    skill, auto-memory or a task still leaves the task without a `retro:` line). Then run `pm learn check <ids>`

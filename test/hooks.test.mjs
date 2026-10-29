@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { setup, tmp, sh, cli, addWorktree } from './helpers.mjs';
 import { pmDir, memoryDir } from '../scripts/lib/paths.mjs';
 import { onSessionStart, onPostToolUse, onStop, onSafetyNote, STALE_MINUTES } from '../scripts/lib/hooks.mjs';
-import { readState, writeState, manualMtime } from '../scripts/lib/store.mjs';
+import { readState, writeState, hasState, manualMtime } from '../scripts/lib/store.mjs';
 import { captureCommits } from '../scripts/lib/gitlink.mjs';
 
 const MIN = 60_000;
@@ -219,6 +219,39 @@ test('stop: without a session_id or its state file there is nothing to compare â
   assert.equal(onStop({}, root, t0 + 120 * MIN), '');
   assert.equal(onStop({ session_id: 'other' }, root, t0 + 120 * MIN), '');
   assert.ok(blocks(root, t0 + 120 * MIN), 'the session that has state still sees it');
+});
+
+test('stop: a session whose start left no state opens its window at the first Stop', () => {
+  const { root } = setup();
+  const { pm, t0 } = begin(root);
+  const late = { session_id: 'late' }; // SessionStart timed out, or the board was created mid-session
+  assert.equal(onStop(late, root, t0 + 120 * MIN), '', 'nothing to compare with yet');
+  assert.ok(hasState(pm, 'session-late'), 'the window starts now');
+  writeState(pm, 'session-late', { ...readState(pm, 'session-late'), start: t0 + 10 * MIN });
+  const f = path.join(root, 'new.js');
+  fs.writeFileSync(f, 'x');
+  touch(f, t0 + 60 * MIN);
+  assert.ok(blocks(root, t0 + 120 * MIN, late), 'and the next Stop sees the session work');
+});
+
+test('stop: a file deleted before the session never counts, even when its directory changes later', () => {
+  const { root } = setup();
+  fs.writeFileSync(path.join(root, '.gitignore'), '*.cache\n');
+  commitAt(root, 'src/a.js', Date.now() - DAY);
+  fs.rmSync(path.join(root, 'src', 'a.js'));
+  const { t0 } = begin(root);
+  fs.writeFileSync(path.join(root, 'src', 'lint.cache'), 'x'); // an ignored tool file: not a change, but it moves the dir mtime
+  touch(path.join(root, 'src'), t0 + 60 * MIN);
+  assert.equal(onStop(S, root, t0 + 120 * MIN), '');
+});
+
+test('stop: a rename made in the session counts even though git mv keeps the file mtime', () => {
+  const { root } = setup();
+  commitAt(root, 'src/a.js', Date.now() - DAY);
+  const { t0 } = begin(root);
+  sh(['mv', 'src/a.js', 'src/b.js'], root);
+  touch(path.join(root, 'src'), t0 + 60 * MIN);
+  assert.match(JSON.parse(onStop(S, root, t0 + 120 * MIN)).reason, /changed 1 file;/);
 });
 
 test('stop: blocks once per window; a re-entrant Stop never blocks', () => {

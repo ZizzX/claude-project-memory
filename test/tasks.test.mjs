@@ -202,4 +202,7 @@ test('cleanLine: one line, no list or heading marker in front, at most 200 chara
   assert.equal(long.length, 200);
   assert.ok(long.endsWith('…'));
   assert.equal(cleanLine(' \n - [ ] '), '', 'nothing left');
+  const emoji = cleanLine('😀'.repeat(250));
+  assert.equal([...emoji].length, 200, 'counted in characters');
+  assert.doesNotMatch(emoji, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/, 'no half of a surrogate pair');
 });

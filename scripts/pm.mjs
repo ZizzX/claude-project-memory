@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pmDir, memoryDir, worktreeName, today } from './lib/paths.mjs';
 import { hasBoard, initBoard, persist, commitPm, isSyncOn, withLock } from './lib/store.mjs';
-import { listTasks, readTask, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, isOpen, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext, epicProgress, epicNothingReady, epicLeftLine } from './lib/tasks.mjs';
+import { listTasks, readTask, newTask, setFields, STATUSES, claim, appendLog, readyQueue, validate, parseOrder, byEpic, activeEpic, taskPrefix, setTaskPrefix, nextNumber, idOf, setNext, clearNext, epicProgress, epicNothingReady, epicLeftLine } from './lib/tasks.mjs';
 import { captureCommits, startCapture, currentBranch } from './lib/gitlink.mjs';
 import { showTask, CLOSED_PREFIX, DONE_PREFIX } from './lib/show.mjs';
 import { currentFocus } from './lib/plan.mjs';
@@ -273,7 +273,8 @@ const commands = {
     }
     const [id, ...words] = positionals;
     const which = values.keep ?? values.dismiss;
-    if ((values.keep !== undefined && values.dismiss !== undefined) || (which !== undefined && (!id || words.length))) {
+    const bad = which !== undefined && (!which || which.startsWith('-') || !id || words.length);
+    if ((values.keep !== undefined && values.dismiss !== undefined) || bad) {
       fail('usage: pm later <id> "<text>" | pm later [<id>] | pm later <id> --keep <n,…|all> | --dismiss <n,…|all>');
     }
     const pm = requireBoard(cwd);
@@ -284,6 +285,7 @@ const commands = {
     if (which !== undefined) {
       const how = values.keep !== undefined ? 'kept' : 'dismissed';
       const lines = resolveLater(pm, id, attempt(() => pickLater(task, which)), how, wt, today());
+      if (!lines.length) return `(no open later items on ${id})`;
       persist(pm, `pm: later ${id} ${how}`);
       return lines.join('\n');
     }
@@ -396,11 +398,9 @@ const commands = {
     if (!keys.some(Boolean)) return '(no epics)';
     const known = new Set(keys.filter(Boolean));
     return keys.map((e) => {
-      const ts = all.filter((t) => t.data.epic === e && t.data.status !== 'dropped');
-      const open = ts.filter(isOpen).length;
+      const p = epicProgress(all, e);
       const focus = e ? currentFocus(pm, e, known) : '';
-      const ready = open ? ` · ${epicProgress(all, e).ready} ready` : '';
-      return `${e || '(none)'} · ${open}/${ts.length} open${ready}${e && !open && ts.length ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
+      return `${e || '(none)'} · ${p.open}/${p.total} open${p.open ? ` · ${p.ready} ready` : ''}${e && !p.open && p.total ? ' · closed' : ''}${focus ? ` · focus: ${focus}` : ''}`;
     }).join('\n');
   },
 

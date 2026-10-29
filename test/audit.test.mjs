@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { setup, cli, sh, tmp, addWorktree } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
-import { runAudit, auditLine, AUDIT_DAYS } from '../scripts/lib/audit.mjs';
+import { runAudit, auditLine, AUDIT_DAYS, isEmptyTask } from '../scripts/lib/audit.mjs';
 import { onSessionStart } from '../scripts/lib/hooks.mjs';
 import { newTask, setFields, claim, appendLog, appendLogLine, setNext, writeConfig } from '../scripts/lib/tasks.mjs';
 import { addLearning } from '../scripts/lib/learn.mjs';
@@ -206,4 +206,12 @@ test('stats: of the tasks created in 30 days — dropped before any work, and st
   assert.equal(r.stats, 'stats (30 days): 4 tasks created · 1 dropped without a did: line · 1 empty 14+ days');
   assert.ok(!r.findings.some((f) => f.code === 'stats'), 'a line, not a finding');
   assert.match(cli(['audit'], root).out, /^stats \(30 days\): /m);
+});
+
+test('isEmptyTask: any text besides the template headings is content', () => {
+  const task = (body) => ({ body, data: { status: 'todo', updated: ago(30), created: ago(30) } });
+  assert.equal(isEmptyTask(task('## Goal\n\n## Understanding\n\n## Checklist\n\n## Log\n'), NOW), true);
+  assert.equal(isEmptyTask(task('notes above the template\n## Goal\n\n## Log\n'), NOW), false);
+  assert.equal(isEmptyTask(task('## Goal\n\n## Notes\nthe real plan\n## Log\n'), NOW), false);
+  assert.equal(isEmptyTask({ ...task('## Goal\n\n## Log\n'), data: { status: 'todo', updated: ago(30), created: ago(3) } }, NOW), false, 'created recently');
 });

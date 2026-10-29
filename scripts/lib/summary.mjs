@@ -88,8 +88,10 @@ export function buildSummary({ pm, worktree, scriptPath, statusLine = '', tasks 
   if (merge?.ask.length) lines.push(`Merged, still open: ${merge.ask.join(', ')} — ask the user, then pm reconcile --yes <the ids they confirm>`);
   if (merge?.conflicts.length) lines.push(`PR conflict: ${merge.conflicts.join(', ')} — details: pm reconcile`);
   if (epics.length) {
-    const of = (e) => tasks.filter((t) => t.data.epic === e && t.data.status !== 'dropped');
-    lines.push(`Epics: ${epics.map((e) => `${e} ${of(e).filter(isOpen).length}/${of(e).length}`).join(' · ')}`);
+    lines.push(`Epics: ${epics.map((e) => {
+      const p = epicProgress(tasks, e);
+      return `${e} ${p.open}/${p.total}`;
+    }).join(' · ')}`);
   }
   if (decisions.length) lines.push(`Decisions: ${decisions.map((d) => `${d.id} ${d.title}`).join(' · ')}`);
   if (learnings.length) lines.push(`Learnings: ${learnings.map((l) => `${l.id} ${l.data.title}`).join(' · ')}`);
