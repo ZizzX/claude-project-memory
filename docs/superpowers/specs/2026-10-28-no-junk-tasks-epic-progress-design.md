@@ -194,8 +194,9 @@ Edits:
 
 ### 3. Stop hook: this session's changes only, no "create a task" — PR1
 
-- SessionStart writes `session-<id>` = `{ start, head, reflogOffset }`; `reflogOffset` is the current size of this
-  worktree's `logs/HEAD` (ENG-1). `onSafetyNote` refreshes all three after each note, so the Stop window then
+- SessionStart writes `session-<id>` = `{ start, head, reflogOffset, deleted }`; `reflogOffset` is the current size
+  of this worktree's `logs/HEAD` (ENG-1); `deleted` lists the dirty paths (and rename sources) already gone at that
+  moment (review of #4, amends ENG-2). `onSafetyNote` refreshes all three after each note, so the Stop window then
   starts at that note — intended, the note already logged those files.
 - `onSafetyNote` writes its `auto:` line through `autoWrite`, so it never counts as a manual board update (ENG-3).
 - `updated` = the newest manual write of PLAN.md, decisions.md or this worktree's task files (as today).
@@ -205,10 +206,13 @@ Edits:
     rebases, resets skipped) and whose entry time satisfies `time * 1000 > since` (same second as the board update
     → not counted). A reflog shorter than the offset (gc, recreated worktree), no `reflogOffset`, or no reflog file
     (reftable) → commits count as none;
-  - **dirty files**: a dirty path whose mtime is newer than `since`; a deleted path counts when the mtime of its
-    nearest existing ancestor directory is newer than `since` (ENG-2; no path set is stored).
-- No `session_id`, no state file for it (an existence check, not `readState`'s `{}`), or no git repository → no
-  block.
+  - **dirty files**: a dirty path whose mtime is newer than `since`; a deleted path — or the old side of a rename,
+    since `git mv` keeps the file mtime — counts when it is not in `deleted` and the mtime of its nearest existing
+    ancestor directory is newer than `since` (ENG-2 plus the review of #4: a directory touched later by an ignored
+    tool file no longer revives an old deletion).
+- No `session_id` or no git repository → no block. A `session_id` with no state file (an existence check, not
+  `readState`'s `{}`: SessionStart timed out, the board was created mid-session) → Stop writes the state now and does
+  not block this time; the window starts there (review of #4).
 - The 20-minute window and the per-worktree `lastBlock` stay. `codeChangedSince` is removed.
 - Message (DX-1): `[pm] This session made 2 commits and changed 3 files; the board was not updated for 20+
   minutes. Log progress on this worktree's task (pm log), or reply that there is nothing to track.` — the counts
