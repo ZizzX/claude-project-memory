@@ -9,7 +9,7 @@ import { listLearnings, promotable } from './learn.mjs';
 export const MAX_LINES = 40;
 export const RULES = [
   'Rules: keep tasks, statuses, log and decisions current yourself via the CLI · end every turn that changed the board with a one-line board diff',
-  '  only the main agent writes pm/ · before calling a task done, ask "what\'s left?" and file leftovers as tasks · protocol: /pm',
+  '  only the main agent writes pm/ · found something outside the task: fix it now (ask first) or offer a new session — a task only when the user says so · protocol: /pm',
 ];
 
 // Epic decorations appear only where an epic exists: a board without epics prints exactly what it printed before.
