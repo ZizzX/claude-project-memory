@@ -121,6 +121,8 @@ export function withLock(pm, name, fn, waitMs = Number(process.env.PM_LOCK_WAIT_
   }
 }
 
+export const hasState = (pm, name) => fs.existsSync(stateFile(pm, name));
+
 export function readState(pm, name) {
   try {
     return JSON.parse(fs.readFileSync(stateFile(pm, name), 'utf8'));

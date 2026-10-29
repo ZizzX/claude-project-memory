@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tryGit, pmDir, worktreeName, today, normPath } from './paths.mjs';
-import { hasBoard, commitPm, isSyncOn, persist, readState, writeState, manualMtime } from './store.mjs';
-import { captureCommits } from './gitlink.mjs';
+import { hasBoard, commitPm, isSyncOn, persist, readState, writeState, hasState, manualMtime, autoWrite } from './store.mjs';
+import { captureCommits, reflogFile, reflogSince, sizeOf, TAKEN } from './gitlink.mjs';
 import { listTasks, appendLogLine, validate } from './tasks.mjs';
 import { writeBoard } from './board.mjs';
 import { buildSummary } from './summary.mjs';
@@ -27,6 +27,17 @@ const HINT = '[pm] this repo has a shared board (branch pm) — say "connect the
 
 const inside = (file, dir) => normPath(file).startsWith(normPath(dir) + path.sep);
 
+// A deleted path has no mtime of its own: removing it touched the nearest directory that still exists.
+function ancestorMtime(top, rel) {
+  for (let dir = path.dirname(path.join(top, rel)); ; dir = path.dirname(dir)) {
+    try {
+      return fs.statSync(dir).mtimeMs;
+    } catch {
+      if (normPath(dir) === normPath(top) || path.dirname(dir) === dir) return 0;
+    }
+  }
+}
+
 function dirtyFilesSince(cwd, since) {
   const top = tryGit(['rev-parse', '--show-toplevel'], cwd);
   const entries = (tryGit(['status', '--porcelain', '-z'], cwd) ?? '').split('\0').filter(Boolean);
@@ -38,7 +49,7 @@ function dirtyFilesSince(cwd, since) {
     try {
       if (fs.statSync(path.join(top, rel)).mtimeMs > since) files.push(rel);
     } catch {
-      files.push(rel); // deleted file: no mtime to compare, but a deletion is still a change
+      if (ancestorMtime(top, rel) > since) files.push(rel);
     }
   }
   return files;
@@ -58,10 +69,26 @@ function lastBoardUpdate(pm, worktree, tasks) {
   return Math.max(0, ...files.filter((f) => fs.existsSync(f)).map((f) => manualMtime(pm, f)));
 }
 
-function codeChangedSince(cwd, since) {
-  const headTime = Number(tryGit(['log', '-1', '--format=%ct'], cwd) || 0) * 1000;
-  return headTime > since || dirtyFilesSince(cwd, since).length > 0;
+// What a session window starts from: its time, HEAD for the note's file list, the reflog size for Stop's commits.
+function sessionState(cwd) {
+  const file = reflogFile(cwd);
+  return { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd), reflogOffset: file ? sizeOf(file) : null };
 }
+
+// Commits made in this worktree after the session window opened, read from its own reflog offset: pulls,
+// merges, rebases and resets are not commits of the session. A reflog shorter than the offset counts none.
+function sessionCommits(cwd, { reflogOffset }, since) {
+  const file = typeof reflogOffset === 'number' && reflogFile(cwd);
+  if (!file) return 0;
+  return reflogSince(file, reflogOffset).entries.filter((e) => TAKEN.test(e.subject) && e.time * 1000 > since).length;
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// PM_DEBUG: what Stop saw and decided — times, counts and paths only. Returns '' so a no-block path ends with it.
+const debug = (line) => {
+  if (process.env.PM_DEBUG) console.error(`[pm] stop: ${line}`);
+  return '';
+};
 
 export function onSessionStart(input, cwd) {
   const pm = pmDir(cwd);
@@ -104,7 +131,7 @@ export function onSessionStart(input, cwd) {
   if (!status && problems.length) status = `[pm] board problems: ${problems.slice(0, 3).join('; ')} — run: pm validate`;
   // A missing session_id means no stdin reached us (a plugin reload, not a real session start).
   // Keying state as "undefined" pools unrelated runs into one window; the summary still prints.
-  if (input.session_id) writeState(pm, `session-${input.session_id}`, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) });
+  if (input.session_id) writeState(pm, `session-${input.session_id}`, sessionState(cwd));
   const notice = updateLine({ pm, cwd }); // never blocks: local sources plus the cached network result
   let audit = '';
   try {
@@ -139,16 +166,28 @@ export function onStop(input, cwd, now = Date.now()) {
   // by hand, and this repeated Stop is the only place that commits it.
   persist(pm, 'pm: stop', tasks);
   if (input.stop_hook_active) return '';
+  // Without its session's state there is no window to compare with: some other run, or a plugin reload.
+  const session = `session-${input.session_id}`;
+  if (!input.session_id || !hasState(pm, session)) return debug('no block — no session state');
   const worktree = worktreeName(cwd);
   const updated = lastBoardUpdate(pm, worktree, tasks);
   const stateName = `stop-${worktree}`;
   const { lastBlock = 0 } = readState(pm, stateName);
   const windowMs = STALE_MINUTES * 60_000;
-  if (now - updated < windowMs || now - lastBlock < windowMs || !codeChangedSince(cwd, updated)) return '';
+  if (now - updated < windowMs) return debug(`no block — board updated ${Math.round((now - updated) / 60_000)} min ago`);
+  if (now - lastBlock < windowMs) return debug('no block — already blocked in this window');
+  const state = readState(pm, session);
+  const since = Math.max(state.start ?? 0, updated);
+  const commits = sessionCommits(cwd, state, since);
+  const files = dirtyFilesSince(cwd, since);
+  const saw = `since ${new Date(since).toISOString()}: ${commits} commits, ${files.length} files${files.length ? ` (${files.slice(0, 10).join(', ')})` : ''}`;
+  if (!commits && !files.length) return debug(`no block — ${saw}`);
+  debug(`block — ${saw}`);
   writeState(pm, stateName, { lastBlock: now });
+  const what = [commits && `made ${plural(commits, 'commit')}`, files.length && `changed ${plural(files.length, 'file')}`].filter(Boolean).join(' and ');
   return JSON.stringify({
     decision: 'block',
-    reason: `[pm] Code changed but the board was not updated for ${STALE_MINUTES}+ minutes. Append a Log entry (did/next) to this worktree's in-progress task, or create/claim a task for this work, or reply that there is nothing to track.`,
+    reason: `[pm] This session ${what}; the board was not updated for ${STALE_MINUTES}+ minutes. Log progress on this worktree's task (pm log), or reply that there is nothing to track.`,
   });
 }
 
@@ -170,9 +209,10 @@ export function onSafetyNote(input, cwd, event) {
     const last = tryGit(['log', '-1', '--format=%h %s'], cwd) ?? 'none';
     const line = `- ${today()} · ${worktree} · auto: changed files: ${shown} · last commit: ${last}`;
     for (const t of listTasks(pm)) {
-      if (t.data.status === 'in_progress' && t.data.worktrees.includes(worktree)) appendLogLine(pm, t.id, line, today());
+      // An automatic write: the Stop nudge keeps seeing the last manual board update.
+      if (t.data.status === 'in_progress' && t.data.worktrees.includes(worktree)) autoWrite(pm, t.file, () => appendLogLine(pm, t.id, line, today()));
     }
-    writeState(pm, stateName, { start: Date.now(), head: tryGit(['rev-parse', 'HEAD'], cwd) }); // next note covers only new changes
+    writeState(pm, stateName, sessionState(cwd)); // next note and the Stop window cover only new changes
   }
   persist(pm, `pm: auto ${event}`);
   return '';

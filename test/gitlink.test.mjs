@@ -5,7 +5,8 @@ import path from 'node:path';
 import { setup, addWorktree, tmp, sh, cli } from './helpers.mjs';
 import { pmDir } from '../scripts/lib/paths.mjs';
 import { readTask } from '../scripts/lib/tasks.mjs';
-import { onStop, onSafetyNote } from '../scripts/lib/hooks.mjs';
+import { onStop, onSafetyNote, onSessionStart } from '../scripts/lib/hooks.mjs';
+import { readState, writeState } from '../scripts/lib/store.mjs';
 import { reflogSince, describeCommits } from '../scripts/lib/gitlink.mjs';
 
 const MIN = 60_000;
@@ -32,8 +33,8 @@ test('reflogSince reads complete lines only and restarts on a shrunken file', ()
   fs.writeFileSync(file, `${whole}${b} ${'c'.repeat(40)} t <t@e> 17894`); // git is still writing the last line
   const first = reflogSince(file, 0);
   assert.deepEqual(first.entries, [
-    { old: z, sha: a, subject: 'commit (initial): init' },
-    { old: a, sha: b, subject: 'commit (amend): two' },
+    { old: z, sha: a, time: 1789410128, subject: 'commit (initial): init' },
+    { old: a, sha: b, time: 1789410128, subject: 'commit (amend): two' },
   ]);
   assert.equal(first.offset, Buffer.byteLength(whole));
   assert.deepEqual(reflogSince(file, first.offset).entries, []);
@@ -172,8 +173,10 @@ test('capture does not hide a stale board from the Stop nudge', () => {
   const pm = pmDir(root);
   const past = new Date(Date.now() - 120 * MIN);
   for (const f of ['PLAN.md', 'decisions.md', path.join('tasks', 'T-001.md')]) fs.utimesSync(path.join(pm, f), past, past);
+  onSessionStart({ session_id: 's' }, root);
+  writeState(pm, 'session-s', { ...readState(pm, 'session-s'), start: past.getTime() });
   const sha = commit(root, 'a.txt');
-  const out = onStop({}, root);
+  const out = onStop({ session_id: 's' }, root);
   assert.deepEqual(commitsOf(root, 'T-001'), [sha], 'the commit was linked');
   assert.equal(JSON.parse(out).decision, 'block', 'and the nudge still fired');
 });

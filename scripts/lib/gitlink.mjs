@@ -5,7 +5,7 @@ import { listTasks, readTask, writeTask, appendLogLine } from './tasks.mjs';
 
 // Reflog subjects of commits created in this worktree. Merges, pulls, resets, checkouts and rebases are skipped:
 // they move HEAD to commits made — and captured — somewhere else.
-const TAKEN = /^(commit|commit \(initial\)|commit \(amend\)|cherry-pick|revert): /;
+export const TAKEN = /^(commit|commit \(initial\)|commit \(amend\)|cherry-pick|revert): /;
 const OID = /^[0-9a-f]{40}([0-9a-f]{24})?$/; // SHA-1 or SHA-256
 const short = (sha) => sha.slice(0, 12);
 const cursorName = (worktree) => `capture-${worktree}`;
@@ -16,11 +16,11 @@ export function currentBranch(cwd) {
 }
 
 // ponytail: reads the files-backend reflog; a reftable repository has no logs/HEAD and captures nothing.
-function reflogFile(cwd) {
+export function reflogFile(cwd) {
   return tryGit(['rev-parse', '--path-format=absolute', '--git-path', 'logs/HEAD'], cwd);
 }
 
-function sizeOf(file) {
+export function sizeOf(file) {
   try {
     return fs.statSync(file).size;
   } catch {
@@ -28,7 +28,8 @@ function sizeOf(file) {
   }
 }
 
-// Complete lines after byte `offset`: "<old> <new> <name> <email> <time> <tz>\t<subject>" (git update-ref).
+// Complete lines after byte `offset`: "<old> <new> <name> <email> <time> <tz>\t<subject>" (git update-ref);
+// `time` is the entry's unix time in seconds (the committer date git used for the update).
 // A file shorter than the offset (expired reflog, or a worktree recreated under the same name) yields nothing,
 // restarts the cursor at its size and reports `truncated`: the commits of the lost window cannot be linked.
 // ponytail: a reflog rewritten by gc that grew past the offset again is read from a cut line; that line fails
@@ -47,7 +48,8 @@ export function reflogSince(file, offset) {
   const entries = buf.subarray(0, end).toString('utf8').split('\n').map((line) => {
     const [old = '', sha = ''] = line.split(' ', 2);
     const tab = line.indexOf('\t');
-    return { old, sha, subject: tab === -1 ? '' : line.slice(tab + 1) };
+    const time = Number((tab === -1 ? line : line.slice(0, tab)).match(/> (\d+) [+-]\d{4}$/)?.[1] ?? 0);
+    return { old, sha, time, subject: tab === -1 ? '' : line.slice(tab + 1) };
   }).filter((e) => OID.test(e.old) && OID.test(e.sha));
   return { entries, offset: offset + end, truncated: false };
 }
